@@ -1,0 +1,10 @@
+{
+  "jira": {
+    "base_url": "https://your-domain.atlassian.net",
+    "user_email": "your-email@company.com",
+    "api_token": "YOUR_JIRA_API_TOKEN"
+  },
+  "tempo": {
+    "api_token": "YOUR_TEMPO_API_TOKEN"
+  }
+}
