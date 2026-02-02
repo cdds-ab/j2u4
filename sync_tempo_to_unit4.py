@@ -27,7 +27,6 @@ from playwright.async_api import Frame, Page, async_playwright
 # Constants
 # ============================================================================
 
-UNIT4_URL = "https://ubw.unit4cloud.com/YOUR_TENANT/Default.aspx"
 SESSION_FILE = "session.json"
 CONFIG_FILE = "config.json"
 MAPPING_FILE = "account_to_arbauft_mapping.json"
@@ -328,10 +327,10 @@ async def get_content_frame(page: Page) -> Frame:
     return page.main_frame
 
 
-async def login_and_navigate(page: Page, context) -> Frame:
+async def login_and_navigate(page: Page, context, unit4_url: str) -> Frame:
     """Login to Unit4 and navigate to Zeiterfassung."""
     print("[*] Opening Unit4...")
-    await page.goto(UNIT4_URL)
+    await page.goto(unit4_url)
     await page.wait_for_load_state("networkidle")
     await asyncio.sleep(2)
 
@@ -956,6 +955,10 @@ async def sync(week: str, cutover: str | None, execute: bool):
     # Load config and mapping
     config = load_config()
     mapping = load_mapping()
+    unit4_url = config.get("unit4", {}).get("url")
+    if not unit4_url:
+        print("[!] Error: unit4.url not configured in config.json")
+        return
     print(f"[*] Loaded mapping with {len(mapping)} accounts")
 
     # Get week dates
@@ -1026,7 +1029,7 @@ async def sync(week: str, cutover: str | None, execute: bool):
             context = await browser.new_context(no_viewport=True)
 
         page = await context.new_page()
-        frame = await login_and_navigate(page, context)
+        frame = await login_and_navigate(page, context, unit4_url)
 
         # Set week
         if not await set_week(frame, page, week):

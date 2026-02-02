@@ -38,10 +38,17 @@ Playwright ──→ Unit4 Zeiterfassung (browser automation)
    Edit `config.json` with your credentials:
    ```json
    {
-     "jira_url": "https://<YOUR-ORG>.atlassian.net",
-     "jira_email": "your-email@example.com",
-     "jira_api_token": "your-jira-api-token",
-     "tempo_api_token": "your-tempo-api-token"
+     "jira": {
+       "base_url": "https://<YOUR-ORG>.atlassian.net",
+       "user_email": "your-email@example.com",
+       "api_token": "your-jira-api-token"
+     },
+     "tempo": {
+       "api_token": "your-tempo-api-token"
+     },
+     "unit4": {
+       "url": "https://ubw.unit4cloud.com/<YOUR-TENANT>/Default.aspx"
+     }
    }
    ```
 

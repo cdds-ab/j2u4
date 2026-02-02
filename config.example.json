@@ -6,5 +6,8 @@
   },
   "tempo": {
     "api_token": "YOUR_TEMPO_API_TOKEN"
+  },
+  "unit4": {
+    "url": "https://ubw.unit4cloud.com/YOUR_TENANT/Default.aspx"
   }
 }

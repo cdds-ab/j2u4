@@ -14,7 +14,6 @@ from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, Page, Frame
 import requests
 
-UNIT4_URL = "https://ubw.unit4cloud.com/YOUR_TENANT/Default.aspx"
 SESSION_FILE = "session.json"
 ACCOUNT_FIELD = "customfield_10048"
 OUTPUT_FILE = "account_to_arbauft_mapping.json"
@@ -148,6 +147,10 @@ async def main():
     print()
 
     config = load_config()
+    unit4_url = config.get("unit4", {}).get("url")
+    if not unit4_url:
+        print("[!] Error: unit4.url not configured in config.json")
+        return
 
     # Load existing mapping first
     mapping = {}
@@ -176,7 +179,7 @@ async def main():
 
         # === LOGIN ===
         print("[*] Opening Unit4...")
-        await page.goto(UNIT4_URL)
+        await page.goto(unit4_url)
         await page.wait_for_load_state("networkidle")
         await asyncio.sleep(2)
 
