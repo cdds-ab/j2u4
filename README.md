@@ -25,21 +25,27 @@ Playwright ──→ Unit4 Zeiterfassung (browser automation)
    playwright install chromium
    ```
 
-2. **Create config file**
+2. **Create API tokens**
+
+   - **Jira API Token**: [Create here](https://id.atlassian.com/manage-profile/security/api-tokens)
+   - **Tempo API Token**: Go to Tempo > Settings > API Integration
+     `https://<YOUR-ORG>.atlassian.net/plugins/servlet/ac/io.tempo.jira/tempo-app#!/configuration/api-integration`
+
+3. **Create config file**
    ```bash
    cp config.example.json config.json
    ```
    Edit `config.json` with your credentials:
    ```json
    {
-     "jira_url": "https://your-jira.atlassian.net",
+     "jira_url": "https://<YOUR-ORG>.atlassian.net",
      "jira_email": "your-email@example.com",
-     "jira_api_token": "your-api-token",
-     "tempo_api_token": "your-tempo-token"
+     "jira_api_token": "your-jira-api-token",
+     "tempo_api_token": "your-tempo-api-token"
    }
    ```
 
-3. **First run (login)**
+4. **First run (login)**
 
    On first run, Unit4 will prompt for login (2FA). The session is saved to `session.json` for subsequent runs.
 
