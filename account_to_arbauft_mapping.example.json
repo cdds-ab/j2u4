@@ -1,0 +1,12 @@
+{
+  "123": {
+    "unit4_arbauft": "1234-56789-100",
+    "tempo_name": "Example Project - Support",
+    "sample_ticket": "PROJ-123"
+  },
+  "456": {
+    "unit4_arbauft": "1234-56789-200",
+    "tempo_name": "Example Project - Development",
+    "sample_ticket": "PROJ-456"
+  }
+}

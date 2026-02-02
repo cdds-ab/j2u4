@@ -1,6 +1,7 @@
 # Secrets and session data
 config.json
 session.json
+account_to_arbauft_mapping.json
 
 # Python
 __pycache__/
