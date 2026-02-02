@@ -32,7 +32,7 @@ SESSION_FILE = "session.json"
 CONFIG_FILE = "config.json"
 MAPPING_FILE = "account_to_arbauft_mapping.json"
 ACCOUNT_FIELD = "customfield_10048"
-TIMEOUT = 3000
+TIMEOUT = 10000  # 10 seconds - generous timeout for slow pages
 DAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
@@ -309,9 +309,22 @@ def ask_for_arbauft(worklog: TempoWorklog, mapping: dict) -> str | None:
 
 async def get_content_frame(page: Page) -> Frame:
     """Get the iframe with actual content."""
+    # Try to find the content frame by URL pattern
     for frame in page.frames:
         if "ContentContainer" in frame.url:
             return frame
+
+    # Fallback: find frame that contains the "Woche" field
+    for frame in page.frames:
+        try:
+            week_field = frame.get_by_label("Woche", exact=False).first
+            if await week_field.count() > 0:
+                return frame
+        except Exception:
+            continue
+
+    # Debug: print available frames
+    print(f"    [DEBUG] Available frames: {[f.url for f in page.frames]}")
     return page.main_frame
 
 
@@ -329,56 +342,146 @@ async def login_and_navigate(page: Page, context) -> Frame:
         await asyncio.sleep(2)
 
     # Navigate to Zeiterfassung
-    print("[*] Opening Zeiterfassung...")
+    print("[*] Opening Zeiterfassung...", end=" ", flush=True)
     try:
         menu = page.get_by_text("Zeiterfassung - Standard", exact=True).first
         if await menu.count() > 0:
             await menu.click(timeout=5000)
+            print("clicked...", end=" ", flush=True)
     except Exception:
+        print()
         print("[!] Navigate to Zeiterfassung manually, then ENTER...")
-        await asyncio.get_event_loop().run_in_executor(None, input)
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, input)
+        except EOFError:
+            pass
 
+    # Wait for page to fully load
+    print("waiting...", end=" ", flush=True)
     await page.wait_for_load_state("networkidle")
-    await asyncio.sleep(3)
 
-    return await get_content_frame(page)
+    # Wait until "Woche" field is visible - re-check frame each iteration
+    for i in range(15):
+        frame = await get_content_frame(page)
+        try:
+            week_field = frame.get_by_label("Woche", exact=False).first
+            if await week_field.count() > 0 and await week_field.is_visible(timeout=500):
+                print("OK")
+                return frame
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+        if i % 5 == 4:
+            print(f"{i+1}s...", end=" ", flush=True)
+
+    print("timeout, continuing anyway")
+    return frame
 
 
 async def set_week(frame: Frame, page: Page, week: str) -> bool:
     """Set the week in Unit4."""
     print(f"[*] Setting week {week}...", end=" ", flush=True)
-    try:
-        week_input = frame.get_by_label("Woche", exact=False).first
-        if await week_input.count() > 0:
-            await week_input.click(timeout=TIMEOUT, force=True)
-            await week_input.press("Control+a")
-            await week_input.type(week, delay=30)
-            await page.keyboard.press("Tab")
-            await asyncio.sleep(3)
-            print("OK")
-            return True
-    except Exception as e:
-        print(f"Error: {e}")
+
+    for attempt in range(3):
+        try:
+            # Re-get frame on each attempt (it might have changed)
+            if attempt > 0:
+                frame = await get_content_frame(page)
+
+            # Try multiple ways to find the week input
+            week_input = None
+            strategies = [
+                lambda: frame.get_by_label("Woche", exact=False).first,
+                lambda: frame.locator("input[id*='week']").first,
+                lambda: frame.locator("input[name*='week']").first,
+                lambda: frame.locator("input[data-fieldid]").filter(has_text="").first,  # Any input
+            ]
+
+            for strategy in strategies:
+                try:
+                    candidate = strategy()
+                    if await candidate.count() > 0 and await candidate.is_visible(timeout=500):
+                        week_input = candidate
+                        break
+                except Exception:
+                    continue
+
+            if week_input:
+                await week_input.click(timeout=TIMEOUT, force=True)
+                await asyncio.sleep(0.3)
+                await week_input.press("Control+a")
+                await week_input.type(week, delay=30)
+                await page.keyboard.press("Tab")
+                await asyncio.sleep(3)
+                print("OK")
+                return True
+            else:
+                if attempt < 2:
+                    print(f"retry {attempt + 1}...", end=" ", flush=True)
+                    await asyncio.sleep(2)
+                else:
+                    print("FAILED (field not found)")
+        except Exception as e:
+            if attempt < 2:
+                print(f"error, retry {attempt + 1}...", end=" ", flush=True)
+                await asyncio.sleep(2)
+            else:
+                print(f"FAILED: {e}")
+
     return False
 
 
-async def extract_unit4_entries(frame: Frame) -> list[Unit4Entry]:
-    """Extract current entries from Unit4 (looking for [WL:xxx] markers)."""
+async def extract_unit4_entries(frame: Frame, debug: bool = False) -> list[Unit4Entry]:
+    """Extract current entries from Unit4 (looking for [WL:xxx] markers).
+
+    Checks both visible text and title attributes of cells, since the Text
+    column is often truncated in the display (showing "working on p..." instead
+    of the full text with [WL:xxx] marker).
+    """
     entries = []
     seen_wl_ids: set[int] = set()  # Deduplicate by worklog_id
 
     try:
         rows = await frame.locator("tr").all()
+        if debug:
+            print(f"    [DEBUG] Found {len(rows)} rows in frame")
         for row in rows:
             try:
                 row_text = await row.inner_text(timeout=500)
 
+                # Also check title attributes of all cells for full text
+                # (the Text column is often truncated in display)
+                try:
+                    cells = await row.locator("td").all()
+                    for cell in cells:
+                        try:
+                            title = await cell.get_attribute("title", timeout=100)
+                            if title and "[WL:" in title:
+                                row_text = row_text + " " + title
+                                break
+                            # Also check child elements (spans, divs) for title
+                            child_with_title = cell.locator("[title*='[WL:']").first
+                            if await child_with_title.count() > 0:
+                                child_title = await child_with_title.get_attribute("title", timeout=100)
+                                if child_title:
+                                    row_text = row_text + " " + child_title
+                                    break
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+
                 # Look for [WL:xxx] marker
                 wl_match = re.search(r"\[WL:(\d+)\]", row_text)
                 if not wl_match:
+                    # Debug: show rows that might contain WL markers but weren't found
+                    if debug and "WL" in row_text:
+                        print(f"    [DEBUG] Row contains 'WL' but no match: {row_text[:80]}...")
                     continue
 
                 worklog_id = int(wl_match.group(1))
+                if debug:
+                    print(f"    [DEBUG] Found WL:{worklog_id}")
 
                 # Skip if already seen (nested tr elements can match same text)
                 if worklog_id in seen_wl_ids:
@@ -575,27 +678,45 @@ async def fill_hours_by_date(frame: Frame, page: Page, hours: float, date_str: s
 
             # Double-click to edit
             await erfasst_cell.dblclick(timeout=TIMEOUT)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.8)
 
-            # Find active input and fill
-            active_input = frame.locator("input:focus").first
-            if await active_input.count() == 0:
-                active_input = frame.locator("input.x-form-field:visible").first
-            if await active_input.count() == 0:
-                active_input = frame.locator("input[type='text']:visible").last
+            # Find active/editable input - try multiple strategies
+            active_input = None
 
-            if await active_input.count() > 0:
-                await active_input.fill(hours_str)
+            # Strategy 1: Input with focus
+            candidate = frame.locator("input:focus").first
+            if await candidate.count() > 0:
+                active_input = candidate
+
+            # Strategy 2: Input in the clicked cell (not readonly)
+            if not active_input:
+                candidate = erfasst_cell.locator("input:not([readonly])").first
+                if await candidate.count() > 0:
+                    active_input = candidate
+
+            # Strategy 3: Any editable input in Zeitdetails area
+            if not active_input:
+                candidate = frame.locator("input[data-type='Double']:not([readonly]):not([disabled])").first
+                if await candidate.count() > 0:
+                    active_input = candidate
+
+            if active_input and await active_input.count() > 0:
+                # Use JavaScript to set value (more reliable than fill for some inputs)
+                try:
+                    await active_input.fill(hours_str)
+                except Exception:
+                    # Fallback: use JavaScript
+                    await active_input.evaluate(f"el => {{ el.value = '{hours_str}'; el.dispatchEvent(new Event('change')); }}")
                 await page.keyboard.press("Tab")
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.5)
                 print("OK")
                 return True
             else:
-                # Blind typing fallback
+                # Blind typing fallback - just type into whatever has focus
                 await page.keyboard.press("Control+a")
-                await page.keyboard.type(hours_str, delay=50)
+                await page.keyboard.type(hours_str, delay=30)
                 await page.keyboard.press("Tab")
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.5)
                 print("OK (blind)")
                 return True
 
@@ -753,13 +874,13 @@ async def add_unit4_entry(frame: Frame, page: Page, worklog: TempoWorklog, dry_r
     except Exception as e:
         print(f"FAILED (zoom: {e})")
         return False
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)  # Wait for dialog to fully open
 
     # Fill form - ArbAuft first (it auto-fills Text), then Text LAST to override
     print("filling ArbAuft...", end=" ", flush=True)
     arbauft_ok = await find_and_fill_by_label(frame, page, "ArbAuft", worklog.arbauft)
     print("OK" if arbauft_ok else "FAIL", end=" | ", flush=True)
-    await asyncio.sleep(0.5)  # Wait for auto-fill to complete
+    await asyncio.sleep(1)  # Wait for auto-fill to complete
 
     print("Aktivität...", end=" ", flush=True)
     aktivitaet_ok = await find_and_fill_by_label(frame, page, "Aktivität", "TEMPO")
@@ -789,11 +910,29 @@ async def add_unit4_entry(frame: Frame, page: Page, worklog: TempoWorklog, dry_r
         return False
 
     # Click OK to close dialog
-    if not await find_and_click_button(frame, "OK"):
-        print("FAILED (OK)")
+    ok_clicked = await find_and_click_button(frame, "OK")
+    if not ok_clicked:
+        # Try pressing Enter as fallback
+        await page.keyboard.press("Enter")
+        await asyncio.sleep(1)
+        # Still try to close any open dialog
+        await find_and_click_button(frame, "Abbrechen")
+        await find_and_click_button(frame, "OK")
+        print("FAILED (OK) - dialog closed")
         return False
 
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(2)  # Wait for dialog to close and data to save
+
+    # Verify dialog is actually closed by checking if "Ergänzen" is visible
+    ergaenzen = frame.get_by_text("Ergänzen", exact=True).first
+    for _ in range(5):
+        if await ergaenzen.count() > 0 and await ergaenzen.is_visible(timeout=500):
+            break
+        await asyncio.sleep(0.5)
+        # Try closing any remaining dialog
+        await find_and_click_button(frame, "OK")
+        await find_and_click_button(frame, "Abbrechen")
+
     print("OK")
     return True
 
@@ -890,77 +1029,168 @@ async def sync(week: str, cutover: str | None, execute: bool):
         frame = await login_and_navigate(page, context)
 
         # Set week
-        await set_week(frame, page, week)
+        if not await set_week(frame, page, week):
+            print("[!] Failed to set week - page may not have loaded correctly")
+            print("    Waiting for page to stabilize...")
+            await asyncio.sleep(5)
+            # Try one more time
+            await set_week(frame, page, week)
+
+        # Wait for page to be ready (check for "Ergänzen" button)
+        print("[4.5] Waiting for page to be ready...", end=" ", flush=True)
+        for i in range(10):
+            ergaenzen_btn = frame.get_by_text("Ergänzen", exact=True).first
+            if await ergaenzen_btn.count() > 0 and await ergaenzen_btn.is_visible(timeout=1000):
+                print("OK")
+                break
+            await asyncio.sleep(1)
+            if i == 9:
+                print("TIMEOUT - 'Ergänzen' button not found!")
+                print("    The page may not have loaded correctly.")
 
         # Extract existing entries with [WL:...] markers
         print()
         print("[5] Scanning existing entries for [WL:...] markers...")
-        existing_entries = await extract_unit4_entries(frame)
+        existing_entries = await extract_unit4_entries(frame, debug=True)
         existing_wl_ids = {e.worklog_id for e in existing_entries}
         print(f"    Found {len(existing_entries)} synced entries")
 
-        # Find which worklogs already exist in Unit4
-        already_exists = [wl for wl in valid_worklogs if wl.worklog_id in existing_wl_ids]
-
         print()
         print("[6] Status:")
-        print(f"    - Already in Unit4: {len(already_exists)} entries")
-        print(f"    - New: {len(valid_worklogs) - len(already_exists)} entries")
+        print(f"    - Existing [WL:] entries to delete: {len(existing_entries)}")
+        print(f"    - Tempo worklogs to create: {len(valid_worklogs)}")
 
-        # For each existing entry, mark it and ask user to delete
-        if already_exists and not dry_run:
+        # Simple logic: Delete ALL existing [WL:] entries, then create all fresh
+        # This avoids duplicates and ensures data is always in sync
+        if existing_entries and not dry_run:
             print()
-            print("[6.1] Marking existing entries for deletion...")
-            for wl in already_exists:
-                print()
-                print(f"    >>> {wl.issue_key} | {wl.hours}h | {wl.date} [WL:{wl.worklog_id}]")
+            print("[6.1] Deleting ALL existing [WL:] entries...")
+            marked_count = 0
+            for entry in existing_entries:
+                print(f"    [WL:{entry.worklog_id}] {entry.ticketno}...", end=" ", flush=True)
 
-                # Try to find the row and click the checkbox in first column
+                # Try to find the row - search by title attribute or visible text
+                row = None
                 try:
-                    row = frame.locator(f"tr:has-text('[WL:{wl.worklog_id}]')").first
-                    if await row.count() > 0:
-                        # Click the actual checkbox input element
+                    # First try: find cell with title containing the WL marker
+                    cell_with_title = frame.locator(f"td[title*='[WL:{entry.worklog_id}]']").first
+                    if await cell_with_title.count() > 0:
+                        row = cell_with_title.locator("xpath=ancestor::tr[1]")
+
+                    # Second try: find child element with title
+                    if not row or await row.count() == 0:
+                        elem_with_title = frame.locator(f"[title*='[WL:{entry.worklog_id}]']").first
+                        if await elem_with_title.count() > 0:
+                            row = elem_with_title.locator("xpath=ancestor::tr[1]")
+
+                    # Third try: visible text (for entries with marker at beginning)
+                    if not row or await row.count() == 0:
+                        row = frame.locator(f"tr:has-text('[WL:{entry.worklog_id}]')").first
+
+                    if row and await row.count() > 0:
+                        # Click the checkbox - use pure JavaScript for scroll and click
                         checkbox = row.locator("input[type='checkbox']").first
                         if await checkbox.count() > 0:
-                            await checkbox.click(timeout=TIMEOUT)
-                            await asyncio.sleep(0.5)
-                            print("    ^^^ Row selected. Click 'Löschen' button, then ENTER...")
+                            await checkbox.evaluate("""el => {
+                                el.scrollIntoView({block: 'center', behavior: 'instant'});
+                                el.click();
+                            }""")
+                            await asyncio.sleep(0.3)
+                            print("marked")
+                            marked_count += 1
                         else:
-                            print("    [!] Checkbox not found in row")
+                            print("no checkbox")
                     else:
-                        print(f"    [!] Row not found. Please find and delete [WL:{wl.worklog_id}] manually, then ENTER...")
+                        print("row not found")
                 except Exception as e:
-                    print(f"    [!] Could not mark row: {e}")
-                    print(f"    Please find and delete [WL:{wl.worklog_id}] manually, then ENTER...")
+                    print(f"error: {e}")
 
-                await asyncio.get_event_loop().run_in_executor(None, input)
+            if marked_count > 0:
+                print()
+                print(f"    Marked {marked_count} entries.")
+                print("    >>> Check the browser - are all entries marked correctly?")
+                print("    >>> Press ENTER to click 'Löschen', or Ctrl+C to abort...")
+                try:
+                    await asyncio.get_event_loop().run_in_executor(None, input)
+                except EOFError:
+                    pass
+                print("    Clicking 'Löschen'...", end=" ", flush=True)
+                # Click the "Löschen" button to delete all marked entries
+                if await find_and_click_button(frame, "Löschen"):
+                    await asyncio.sleep(3)
+                    # Confirm deletion if dialog appears
+                    await find_and_click_button(frame, "Ja")
+                    await find_and_click_button(frame, "OK")
+                    await asyncio.sleep(2)
+                    print("deleted...", end=" ", flush=True)
 
-            # Re-scan after deletions
-            print()
-            print("    Re-scanning...")
-            existing_entries = await extract_unit4_entries(frame)
-            existing_wl_ids = {e.worklog_id for e in existing_entries}
-            still_exists = [wl for wl in valid_worklogs if wl.worklog_id in existing_wl_ids]
+                    # Save after deletion to commit changes (may not be necessary, but ensures consistency)
+                    print("saving...", end=" ", flush=True)
+                    saved = await find_and_click_button(frame, "Speichern")
+                    if not saved:
+                        saved = await find_and_click_button(page, "Speichern")
+                    if not saved:
+                        await page.keyboard.press("Control+s")
+                    await asyncio.sleep(2)
+                    # Close any dialog that appears after saving
+                    await find_and_click_button(frame, "OK")
+                    await find_and_click_button(page, "OK")
+                    await asyncio.sleep(1)
+                    print("OK")
+                else:
+                    print("button not found")
 
-            if still_exists:
-                print(f"    [!] Warning: {len(still_exists)} entries still exist (not deleted)")
-                for wl in still_exists:
-                    print(f"        - {wl.issue_key} [WL:{wl.worklog_id}]")
+            # Re-scan and repeat deletion if entries remain (may need multiple passes)
+            for delete_pass in range(3):
+                print()
+                print(f"    Re-scanning (pass {delete_pass + 1})...")
+                await asyncio.sleep(2)  # Wait for page to update
+                remaining = await extract_unit4_entries(frame)
+                if not remaining:
+                    print("    All [WL:] entries deleted successfully")
+                    break
+                print(f"    {len(remaining)} [WL:] entries still exist, deleting again...")
 
-        # All worklogs will be created (user should have deleted existing ones)
-        to_create = [wl for wl in valid_worklogs if wl.worklog_id not in existing_wl_ids]
+                # Mark remaining entries
+                marked = 0
+                for entry in remaining:
+                    try:
+                        row = frame.locator(f"tr:has-text('[WL:{entry.worklog_id}]')").first
+                        if await row.count() > 0:
+                            checkbox = row.locator("input[type='checkbox']").first
+                            if await checkbox.count() > 0:
+                                await checkbox.evaluate("el => { el.scrollIntoView({block: 'center'}); el.click(); }")
+                                await asyncio.sleep(0.2)
+                                marked += 1
+                    except Exception:
+                        pass
+
+                if marked > 0:
+                    print(f"    Marked {marked}, deleting...", end=" ", flush=True)
+                    if await find_and_click_button(frame, "Löschen"):
+                        await asyncio.sleep(3)
+                        await find_and_click_button(frame, "Ja")
+                        await find_and_click_button(frame, "OK")
+                        await asyncio.sleep(2)
+                        # Save after each deletion pass
+                        await find_and_click_button(frame, "Speichern")
+                        await asyncio.sleep(3)
+                        print("OK")
+
+        # After deletion (or if nothing to delete), create all worklogs fresh
+        to_create = valid_worklogs
         print()
         print(f"    Entries to create: {len(to_create)}")
 
         if dry_run:
             print()
-            if already_exists:
-                print("[DRY-RUN] Would mark for deletion (user deletes manually):")
-                for wl in already_exists:
-                    print(f"    - {wl.issue_key} | {wl.hours}h | {wl.date} [WL:{wl.worklog_id}]")
+            if existing_entries:
+                print(f"[DRY-RUN] Would DELETE {len(existing_entries)} existing [WL:] entries:")
+                for entry in existing_entries:
+                    print(f"    - {entry.ticketno} [WL:{entry.worklog_id}]")
                 print()
-            print("[DRY-RUN] Would create:")
-            for wl in valid_worklogs:  # Show all, assuming user deletes existing
+            print(f"[DRY-RUN] Would CREATE {len(valid_worklogs)} entries:")
+            for wl in valid_worklogs:
                 print(f"    - {wl.issue_key} | {wl.hours}h | {wl.date} [WL:{wl.worklog_id}]")
             print()
             print("Run with --execute to apply changes.")
@@ -1010,7 +1240,11 @@ async def sync(week: str, cutover: str | None, execute: bool):
 
         print()
         print("[*] Press ENTER to close browser...")
-        await asyncio.get_event_loop().run_in_executor(None, input)
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, input)
+        except EOFError:
+            # Non-interactive mode, wait a bit then close
+            await asyncio.sleep(3)
 
         await browser.close()
 
