@@ -430,86 +430,134 @@ async def set_week(frame: Frame, page: Page, week: str) -> bool:
     return False
 
 
-async def extract_unit4_entries(frame: Frame, debug: bool = False) -> list[Unit4Entry]:
-    """Extract current entries from Unit4 (looking for [WL:xxx] markers).
-
-    Checks both visible text and title attributes of cells, since the Text
-    column is often truncated in the display (showing "working on p..." instead
-    of the full text with [WL:xxx] marker).
-    """
+async def extract_unit4_entries(frame: Frame, debug: bool = False, page: Page = None) -> list[Unit4Entry]:
+    """Extract current entries from Unit4 (looking for [WL:xxx] markers)."""
     entries = []
-    seen_wl_ids: set[int] = set()  # Deduplicate by worklog_id
+    seen_wl_ids: set[int] = set()
 
-    try:
-        rows = await frame.locator("tr").all()
-        if debug:
-            print(f"    [DEBUG] Found {len(rows)} rows in frame")
-        for row in rows:
-            try:
-                row_text = await row.inner_text(timeout=500)
+    # Search all frames if page provided
+    frames_to_search = page.frames if page else [frame]
+    if debug:
+        print(f"    [DEBUG] Searching {len(frames_to_search)} frames")
 
-                # Also check title attributes of all cells for full text
-                # (the Text column is often truncated in display)
+    for search_frame in frames_to_search:
+        try:
+            # Strategy 1: Find elements with [WL: in title attribute
+            elements_with_title = await search_frame.locator("[title*='[WL:']").all()
+            if debug and len(elements_with_title) > 0:
+                print(f"    [DEBUG] Found {len(elements_with_title)} elements with [WL:] in title")
+
+            for elem in elements_with_title:
                 try:
-                    cells = await row.locator("td").all()
-                    for cell in cells:
-                        try:
-                            title = await cell.get_attribute("title", timeout=100)
-                            if title and "[WL:" in title:
-                                row_text = row_text + " " + title
-                                break
-                            # Also check child elements (spans, divs) for title
-                            child_with_title = cell.locator("[title*='[WL:']").first
-                            if await child_with_title.count() > 0:
-                                child_title = await child_with_title.get_attribute("title", timeout=100)
-                                if child_title:
-                                    row_text = row_text + " " + child_title
-                                    break
-                        except Exception:
-                            continue
+                    title = await elem.get_attribute("title", timeout=500)
+                    if not title:
+                        continue
+                    wl_match = re.search(r"\[WL:(\d+)\]", title)
+                    if wl_match:
+                        worklog_id = int(wl_match.group(1))
+                        if worklog_id not in seen_wl_ids:
+                            seen_wl_ids.add(worklog_id)
+                            if debug:
+                                print(f"    [DEBUG] Found [WL:{worklog_id}] in title: {title[:60]}...")
+                            row = elem.locator("xpath=ancestor::tr[1]")
+                            row_text = title
+                            try:
+                                if await row.count() > 0:
+                                    row_text = title + " " + await row.inner_text(timeout=500)
+                            except Exception:
+                                pass
+                            ticket_match = re.search(r"([A-Z]{3,10}-\d+)", row_text)
+                            arbauft_match = re.search(r"(\d{4}-\d{5}-\d{3})", row_text)
+                            entries.append(Unit4Entry(
+                                ticketno=ticket_match.group(1) if ticket_match else "UNKNOWN",
+                                arbauft=arbauft_match.group(1) if arbauft_match else "0000-00000-000",
+                                text=title[:100],
+                                worklog_id=worklog_id,
+                            ))
                 except Exception:
-                    pass
-
-                # Look for [WL:xxx] marker
-                wl_match = re.search(r"\[WL:(\d+)\]", row_text)
-                if not wl_match:
-                    # Debug: show rows that might contain WL markers but weren't found
-                    if debug and "WL" in row_text:
-                        print(f"    [DEBUG] Row contains 'WL' but no match: {row_text[:80]}...")
                     continue
 
-                worklog_id = int(wl_match.group(1))
-                if debug:
-                    print(f"    [DEBUG] Found WL:{worklog_id}")
-
-                # Skip if already seen (nested tr elements can match same text)
-                if worklog_id in seen_wl_ids:
+            # Strategy 2: Search input/textarea values
+            inputs = await search_frame.locator("input, textarea").all()
+            for inp in inputs:
+                try:
+                    val = await inp.input_value(timeout=100)
+                    if val and "[WL:" in val:
+                        wl_match = re.search(r"\[WL:(\d+)\]", val)
+                        if wl_match:
+                            worklog_id = int(wl_match.group(1))
+                            if worklog_id not in seen_wl_ids:
+                                seen_wl_ids.add(worklog_id)
+                                if debug:
+                                    print(f"    [DEBUG] Found [WL:{worklog_id}] in input: {val[:60]}...")
+                                ticket_match = re.search(r"([A-Z]{3,10}-\d+)", val)
+                                arbauft_match = re.search(r"(\d{4}-\d{5}-\d{3})", val)
+                                entries.append(Unit4Entry(
+                                    ticketno=ticket_match.group(1) if ticket_match else "UNKNOWN",
+                                    arbauft=arbauft_match.group(1) if arbauft_match else "0000-00000-000",
+                                    text=val[:100],
+                                    worklog_id=worklog_id,
+                                ))
+                except Exception:
                     continue
-                seen_wl_ids.add(worklog_id)
 
-                # Look for ticket pattern
-                ticket_match = re.search(r"([A-Z]{3,10}-\d+)", row_text)
+            # Strategy 3: Search visible text
+            wl_texts = await search_frame.locator("text=/\\[WL:\\d+\\]/").all()
+            if debug and len(wl_texts) > 0:
+                print(f"    [DEBUG] Found {len(wl_texts)} elements with [WL:] in visible text")
 
-                # Look for ArbAuft pattern
-                arbauft_match = re.search(r"(\d{4}-\d{5}-\d{3})", row_text)
+            for elem in wl_texts:
+                try:
+                    text = await elem.inner_text(timeout=500)
+                    wl_match = re.search(r"\[WL:(\d+)\]", text)
+                    if wl_match:
+                        worklog_id = int(wl_match.group(1))
+                        if worklog_id not in seen_wl_ids:
+                            seen_wl_ids.add(worklog_id)
+                            if debug:
+                                print(f"    [DEBUG] Found [WL:{worklog_id}] in text: {text[:60]}...")
+                            row = elem.locator("xpath=ancestor::tr[1]")
+                            row_text = text
+                            try:
+                                if await row.count() > 0:
+                                    row_text = text + " " + await row.inner_text(timeout=500)
+                            except Exception:
+                                pass
+                            ticket_match = re.search(r"([A-Z]{3,10}-\d+)", row_text)
+                            arbauft_match = re.search(r"(\d{4}-\d{5}-\d{3})", row_text)
+                            entries.append(Unit4Entry(
+                                ticketno=ticket_match.group(1) if ticket_match else "UNKNOWN",
+                                arbauft=arbauft_match.group(1) if arbauft_match else "0000-00000-000",
+                                text=text[:100],
+                                worklog_id=worklog_id,
+                            ))
+                except Exception:
+                    continue
 
-                if ticket_match and arbauft_match:
-                    entries.append(
-                        Unit4Entry(
-                            ticketno=ticket_match.group(1),
-                            arbauft=arbauft_match.group(1),
-                            text=row_text[:100],
-                            worklog_id=worklog_id,
-                        )
-                    )
+        except Exception as e:
+            if debug:
+                print(f"    [DEBUG] Error in frame: {e}")
+            continue
 
+    # Final debug: show all inputs containing "WL" if nothing found
+    if debug and len(entries) == 0 and page:
+        print("    [DEBUG] Nothing found. Scanning ALL inputs for 'WL'...")
+        for search_frame in page.frames:
+            try:
+                inputs = await search_frame.locator("input, textarea").all()
+                for inp in inputs:
+                    try:
+                        val = await inp.input_value(timeout=50)
+                        if val and "WL" in val:
+                            print(f"    [DEBUG] Input with 'WL': {val[:80]}...")
+                    except Exception:
+                        pass
             except Exception:
-                continue
-
-    except Exception as e:
-        print(f"    Error extracting: {e}")
+                pass
 
     return entries
+
+
 
 
 async def read_zeitdetails_structure(frame: Frame) -> dict[str, str]:
@@ -615,6 +663,7 @@ async def expand_zeitdetails(frame: Frame, page: Page) -> bool:
 async def fill_hours_by_date(frame: Frame, page: Page, hours: float, date_str: str) -> bool:
     """Fill hours for a specific date in Zeitdetails."""
     hours_str = str(hours)
+    day_name = date_str  # Fallback display name
 
     # Try multiple times
     for attempt in range(5):
@@ -711,20 +760,24 @@ async def fill_hours_by_date(frame: Frame, page: Page, hours: float, date_str: s
                 print("OK")
                 return True
             else:
-                # Blind typing fallback - just type into whatever has focus
-                await page.keyboard.press("Control+a")
-                await page.keyboard.type(hours_str, delay=30)
-                await page.keyboard.press("Tab")
-                await asyncio.sleep(0.5)
-                print("OK (blind)")
-                return True
+                # No input found - retry instead of blind typing
+                print("no input found, retry...", flush=True)
+                continue
 
         except Exception as e:
             print(f"error: {e}, retry...", flush=True)
             continue
 
-    print("FAILED after 5 attempts")
-    return False
+    # After 5 attempts, ask user to enter manually
+    print()
+    print(f"    [!] Could not fill {hours_str}h for {date_str} automatically.")
+    print(f"    >>> Please enter {hours_str} in the Zeitdetails for {day_name} manually.")
+    print(f"    >>> Press ENTER when done...")
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, input)
+    except EOFError:
+        pass
+    return True  # Assume user did it
 
 
 async def find_and_fill_by_label(frame: Frame, page: Page, label: str, value: str) -> bool:
@@ -873,7 +926,7 @@ async def add_unit4_entry(frame: Frame, page: Page, worklog: TempoWorklog, dry_r
     except Exception as e:
         print(f"FAILED (zoom: {e})")
         return False
-    await asyncio.sleep(2)  # Wait for dialog to fully open
+    await asyncio.sleep(3)  # Wait for dialog to fully open
 
     # Fill form - ArbAuft first (it auto-fills Text), then Text LAST to override
     print("filling ArbAuft...", end=" ", flush=True)
@@ -920,11 +973,11 @@ async def add_unit4_entry(frame: Frame, page: Page, worklog: TempoWorklog, dry_r
         print("FAILED (OK) - dialog closed")
         return False
 
-    await asyncio.sleep(2)  # Wait for dialog to close and data to save
+    await asyncio.sleep(3)  # Wait for dialog to close and data to save
 
     # Verify dialog is actually closed by checking if "Ergänzen" is visible
     ergaenzen = frame.get_by_text("Ergänzen", exact=True).first
-    for _ in range(5):
+    for _ in range(10):
         if await ergaenzen.count() > 0 and await ergaenzen.is_visible(timeout=500):
             break
         await asyncio.sleep(0.5)
@@ -932,6 +985,8 @@ async def add_unit4_entry(frame: Frame, page: Page, worklog: TempoWorklog, dry_r
         await find_and_click_button(frame, "OK")
         await find_and_click_button(frame, "Abbrechen")
 
+    # Extra wait before next entry to let UI fully settle
+    await asyncio.sleep(1)
     print("OK")
     return True
 
@@ -1051,10 +1106,18 @@ async def sync(week: str, cutover: str | None, execute: bool):
                 print("TIMEOUT - 'Ergänzen' button not found!")
                 print("    The page may not have loaded correctly.")
 
-        # Extract existing entries with [WL:...] markers
+        # Wait for table to fully load before scanning
         print()
         print("[5] Scanning existing entries for [WL:...] markers...")
-        existing_entries = await extract_unit4_entries(frame, debug=True)
+        print("    Waiting for table to load...", end=" ", flush=True)
+        await asyncio.sleep(3)  # Give table time to load after week change
+
+        # Deselect any selected row (press Escape) so text appears in table cells, not input field
+        await page.keyboard.press("Escape")
+        await asyncio.sleep(0.5)
+        print("OK")
+
+        existing_entries = await extract_unit4_entries(frame, debug=True, page=page)
         existing_wl_ids = {e.worklog_id for e in existing_entries}
         print(f"    Found {len(existing_entries)} synced entries")
 
@@ -1068,6 +1131,36 @@ async def sync(week: str, cutover: str | None, execute: bool):
         if existing_entries and not dry_run:
             print()
             print("[6.1] Deleting ALL existing [WL:] entries...")
+
+            # Close any open detail view by clicking OK button in Text section
+            print("    Closing detail views...", end=" ", flush=True)
+            try:
+                clicked = False
+                # Search in ALL frames for OK button near Text field
+                for search_frame in page.frames:
+                    if clicked:
+                        break
+                    try:
+                        # Look for OK button that closes the detail/edit view
+                        ok_btn = search_frame.locator("button:has-text('OK'), input[value='OK']").first
+                        if await ok_btn.count() > 0 and await ok_btn.is_visible(timeout=500):
+                            await ok_btn.click(timeout=2000)
+                            clicked = True
+                            print("clicked OK...", end=" ", flush=True)
+                            await asyncio.sleep(0.5)
+                    except Exception:
+                        pass
+
+                if not clicked:
+                    # Fallback: press Escape
+                    await page.keyboard.press("Escape")
+                    await asyncio.sleep(0.3)
+                    print("pressed Escape...", end=" ", flush=True)
+                print("done")
+            except Exception as e:
+                print(f"error: {e}")
+            await asyncio.sleep(0.5)
+
             marked_count = 0
             for entry in existing_entries:
                 print(f"    [WL:{entry.worklog_id}] {entry.ticketno}...", end=" ", flush=True)
@@ -1148,7 +1241,7 @@ async def sync(week: str, cutover: str | None, execute: bool):
                 print()
                 print(f"    Re-scanning (pass {delete_pass + 1})...")
                 await asyncio.sleep(2)  # Wait for page to update
-                remaining = await extract_unit4_entries(frame)
+                remaining = await extract_unit4_entries(frame, page=page)
                 if not remaining:
                     print("    All [WL:] entries deleted successfully")
                     break
