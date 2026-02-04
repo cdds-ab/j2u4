@@ -227,8 +227,18 @@ async def sync(week: str, cutover: str | None, execute: bool):
             await asyncio.sleep(5)
             await unit4.set_week(week)
 
-        # Wait for page to be ready
-        await unit4.wait_for_ready()
+        # Wait for page to be ready (also checks if week is locked)
+        if not await unit4.wait_for_ready():
+            print()
+            print("[!] Cannot sync - week is not editable.")
+            print("    The week may have already been submitted (Bereit/Transferiert).")
+            print()
+            print("[*] Press ENTER to close browser...")
+            try:
+                await asyncio.get_event_loop().run_in_executor(None, input)
+            except EOFError:
+                pass
+            return
 
         # Wait for table to load
         print()

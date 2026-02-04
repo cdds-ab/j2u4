@@ -853,11 +853,22 @@ class Unit4Browser:
         return saved
 
     async def wait_for_ready(self) -> bool:
-        """Wait for the page to be ready (check for Ergänzen button)."""
+        """Wait for the page to be ready (check for Ergänzen button).
+
+        Returns:
+            True if page is ready for editing
+            False if week is already submitted or page didn't load
+        """
         print("[*] Waiting for page to be ready...", end=" ", flush=True)
         frame = await self.frame_manager.get_content_frame()
 
         for i in range(10):
+            # Check if week is already submitted
+            is_submitted = await self._is_week_submitted(frame)
+            if is_submitted:
+                return False
+
+            # Check for Ergänzen button (editable state)
             ergaenzen_btn = frame.get_by_text("Ergänzen", exact=True).first
             if await ergaenzen_btn.count() > 0 and await ergaenzen_btn.is_visible(timeout=1000):
                 print("OK")
@@ -866,5 +877,27 @@ class Unit4Browser:
             if i == 9:
                 print("TIMEOUT - 'Ergänzen' button not found!")
                 return False
+
+        return False
+
+    async def _is_week_submitted(self, frame: Frame) -> bool:
+        """Check if the week has already been submitted (Bereit/Transferiert)."""
+        # Check for status indicators that mean the week is locked
+        status_indicators = [
+            ("Bereit", "marked as ready"),
+            ("Transferiert", "already transferred"),
+            ("Gesendet", "already sent"),
+        ]
+
+        for status_text, description in status_indicators:
+            try:
+                # Look for button or status text
+                elem = frame.get_by_text(status_text, exact=True).first
+                if await elem.count() > 0 and await elem.is_visible(timeout=500):
+                    print(f"LOCKED ({description})")
+                    print(f"    [!] Week is {description} and cannot be edited.")
+                    return True
+            except Exception:
+                continue
 
         return False
