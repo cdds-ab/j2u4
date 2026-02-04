@@ -4,8 +4,19 @@ Build ArbAuft mapping by reverse-engineering from Unit4 history.
 1. Read Unit4 entries from recent weeks (Ticketno + ArbAuft)
 2. For each ticket, fetch Jira issue to get Contract Position (customfield_10048)
 3. Build mapping: Tempo Account -> Unit4 ArbAuft
+
+Usage:
+    # Scan last 8 weeks (default)
+    python build_mapping_from_history.py
+
+    # Scan last N weeks
+    python build_mapping_from_history.py --weeks 12
+
+    # Scan specific range
+    python build_mapping_from_history.py --from 202601 --to 202610
 """
 
+import argparse
 import asyncio
 import json
 import os
@@ -14,20 +25,51 @@ from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, Page, Frame
 import requests
 
-SESSION_FILE = "session.json"
+from utils import load_config_safe, SESSION_FILE, MAPPING_FILE
+
 ACCOUNT_FIELD = "customfield_10048"
-OUTPUT_FILE = "account_to_arbauft_mapping.json"
-
-
-def load_config() -> dict:
-    with open("config.json") as f:
-        return json.load(f)
 
 
 def get_week_string(weeks_ago: int = 0) -> str:
     """Get week string YYYYWW for N weeks ago."""
     target = datetime.now() - timedelta(weeks=weeks_ago)
     return target.strftime("%G%V")
+
+
+def get_weeks_range(weeks_back: int = 8, week_from: str = None, week_to: str = None) -> list[str]:
+    """Generate list of weeks to scan.
+
+    Args:
+        weeks_back: Number of weeks back from current week (default: 8)
+        week_from: Start week YYYYWW (optional, overrides weeks_back)
+        week_to: End week YYYYWW (optional, defaults to current week)
+
+    Returns:
+        List of week strings in YYYYWW format
+    """
+    if week_from and week_to:
+        # Explicit range specified
+        weeks = []
+        current = week_from
+        while current <= week_to:
+            weeks.append(current)
+            # Calculate next week
+            year = int(current[:4])
+            week = int(current[4:])
+            week += 1
+            if week > 52:
+                # Simple handling - ISO weeks can be 52 or 53
+                # Check if week 53 exists for this year
+                dec_31 = datetime(year, 12, 31)
+                max_week = int(dec_31.strftime("%V"))
+                if week > max_week:
+                    week = 1
+                    year += 1
+            current = f"{year}{week:02d}"
+        return weeks
+    else:
+        # Generate last N weeks
+        return [get_week_string(i) for i in range(weeks_back - 1, -1, -1)]
 
 
 async def get_content_frame(page: Page) -> Frame:
@@ -140,13 +182,16 @@ def fetch_jira_account(config: dict, ticket: str) -> dict | None:
     return None
 
 
-async def main():
+async def main(weeks_to_scan: list[str]):
     print("=" * 70)
     print("BUILD MAPPING FROM UNIT4 HISTORY")
     print("=" * 70)
     print()
 
-    config = load_config()
+    config = load_config_safe()
+    if config is None:
+        return
+
     unit4_url = config.get("unit4", {}).get("url")
     if not unit4_url:
         print("[!] Error: unit4.url not configured in config.json")
@@ -154,8 +199,8 @@ async def main():
 
     # Load existing mapping first
     mapping = {}
-    if os.path.exists(OUTPUT_FILE):
-        with open(OUTPUT_FILE) as f:
+    if os.path.exists(MAPPING_FILE):
+        with open(MAPPING_FILE) as f:
             mapping = json.load(f)
         print(f"[*] Loaded existing mapping with {len(mapping)} entries")
 
@@ -204,13 +249,8 @@ async def main():
 
         frame = await get_content_frame(page)
 
-        # === SCAN SPECIFIC WEEKS ===
-        # January 2026: weeks 01-05, December 2025: weeks 49-52
-        weeks_to_scan = [
-            "202601", "202602", "202603", "202604", "202605",
-            "202549", "202550", "202551", "202552",
-        ]
-        print(f"\n[*] Scanning {len(weeks_to_scan)} weeks (Jan 2026 + Dec 2025)...")
+        # === SCAN WEEKS ===
+        print(f"\n[*] Scanning {len(weeks_to_scan)} weeks: {weeks_to_scan[0]} to {weeks_to_scan[-1]}...")
 
         # Track ArbAufts found in this session (to avoid duplicates in output)
         session_arbaufts = set()
@@ -304,11 +344,56 @@ async def main():
         name = info.get("tempo_name", "?")[:40]
         print(f"{key:<15} {arbauft:<20} {name}")
 
-    with open(OUTPUT_FILE, "w") as f:
+    with open(MAPPING_FILE, "w") as f:
         json.dump(mapping, f, indent=2, ensure_ascii=False)
     print()
-    print(f"[*] Saved to {OUTPUT_FILE}")
+    print(f"[*] Saved to {MAPPING_FILE}")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Build account->ArbAuft mapping from Unit4 history",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    # Scan last 8 weeks (default)
+    python build_mapping_from_history.py
+
+    # Scan last 12 weeks
+    python build_mapping_from_history.py --weeks 12
+
+    # Scan specific range
+    python build_mapping_from_history.py --from 202601 --to 202610
+
+    # Scan a single week
+    python build_mapping_from_history.py --from 202605 --to 202605
+        """,
+    )
+    parser.add_argument(
+        "--weeks", type=int, default=8,
+        help="Number of weeks back from current week to scan (default: 8)"
+    )
+    parser.add_argument(
+        "--from", dest="week_from", metavar="YYYYWW",
+        help="Start week (e.g., 202601). Overrides --weeks."
+    )
+    parser.add_argument(
+        "--to", dest="week_to", metavar="YYYYWW",
+        help="End week (e.g., 202610). Defaults to current week if --from is set."
+    )
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    args = parse_args()
+
+    # Determine weeks to scan
+    if args.week_from:
+        week_to = args.week_to or get_week_string(0)
+        weeks = get_weeks_range(week_from=args.week_from, week_to=week_to)
+    else:
+        weeks = get_weeks_range(weeks_back=args.weeks)
+
+    print(f"Will scan {len(weeks)} weeks: {weeks[0]} to {weeks[-1]}")
+
+    asyncio.run(main(weeks))

@@ -1,0 +1,35 @@
+#!/bin/bash
+# Wrapper script for build_mapping_from_history.py
+# Builds account->ArbAuft mapping by scanning your Unit4 history
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Check if setup was run
+if [ ! -d ".venv" ]; then
+    echo "[!] ERROR: Virtual environment not found!"
+    echo "    Run './setup.sh' first to set up the project."
+    exit 1
+fi
+
+# Check if config exists
+if [ ! -f "config.json" ]; then
+    echo "[!] ERROR: config.json not found!"
+    echo "    Copy config.example.json to config.json and fill in your credentials."
+    exit 1
+fi
+
+echo "This will scan your Unit4 history to build the account mapping."
+echo "A browser window will open - you may need to log in."
+echo
+echo "Options:"
+echo "  --weeks N        Scan last N weeks (default: 8)"
+echo "  --from YYYYWW    Start week (e.g., 202601)"
+echo "  --to YYYYWW      End week (e.g., 202610)"
+echo
+echo "Press ENTER to continue or Ctrl+C to cancel..."
+read
+
+# Activate venv and run
+source .venv/bin/activate
+exec python build_mapping_from_history.py "$@"

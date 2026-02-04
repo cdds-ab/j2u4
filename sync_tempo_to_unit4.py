@@ -2,6 +2,9 @@
 Sync Tempo worklogs to Unit4.
 
 Usage:
+    # Check connectivity first
+    python sync_tempo_to_unit4.py --check
+
     # Dry-run (default) - shows what would happen
     python sync_tempo_to_unit4.py 202605
 
@@ -14,18 +17,126 @@ Usage:
 
 import argparse
 import asyncio
+import sys
 
-from clients import JiraClient, TempoClient, ACCOUNT_FIELD
+import requests
+
+from clients import JiraClient, TempoClient, ACCOUNT_FIELD, ApiError
 from models import TempoWorklog
 from patterns import Patterns
 from unit4_browser import Unit4Browser
 from utils import (
     get_current_week,
     get_week_dates,
-    load_config,
+    load_config_safe,
     load_mapping,
     save_mapping,
 )
+
+
+def check_connectivity(config: dict) -> bool:
+    """Check connectivity to all required services.
+
+    Returns:
+        True if all checks pass, False otherwise.
+    """
+    print()
+    print("=" * 50)
+    print("CONNECTIVITY CHECK")
+    print("=" * 50)
+    print()
+
+    all_ok = True
+    warnings = []
+
+    # Check Jira
+    print("[1] Jira API...", end=" ", flush=True)
+    try:
+        jira = JiraClient(config)
+        account_id = jira.get_my_account_id()
+        print(f"OK (account: {account_id[:8]}...)")
+    except ApiError as e:
+        print(f"FAILED")
+        print(f"    {e}")
+        all_ok = False
+    except Exception as e:
+        print(f"FAILED")
+        print(f"    Unexpected error: {e}")
+        all_ok = False
+
+    # Check Tempo
+    print("[2] Tempo API...", end=" ", flush=True)
+    try:
+        tempo = TempoClient(config)
+        # Just try to fetch worklogs for today to test auth
+        jira = JiraClient(config)
+        account_id = jira.get_my_account_id()
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        tempo.fetch_worklogs(account_id, today, today)
+        print("OK")
+    except ApiError as e:
+        print(f"FAILED")
+        print(f"    {e}")
+        all_ok = False
+    except Exception as e:
+        print(f"FAILED")
+        print(f"    Unexpected error: {e}")
+        all_ok = False
+
+    # Check Unit4 URL
+    print("[3] Unit4 URL...", end=" ", flush=True)
+    unit4_url = config.get("unit4", {}).get("url")
+    if not unit4_url:
+        print("FAILED")
+        print("    unit4.url not configured in config.json")
+        all_ok = False
+    else:
+        try:
+            r = requests.head(unit4_url, timeout=10, allow_redirects=True)
+            if r.ok or r.status_code in [302, 401, 403]:
+                # 302/401/403 are OK - means the server is reachable
+                print(f"OK ({unit4_url})")
+            else:
+                print(f"WARNING (HTTP {r.status_code})")
+                print(f"    URL may be incorrect or server unavailable")
+        except requests.exceptions.ConnectionError:
+            print("FAILED")
+            print(f"    Cannot connect to {unit4_url}")
+            print("    Check if you're connected to VPN!")
+            all_ok = False
+        except requests.exceptions.Timeout:
+            print("FAILED")
+            print(f"    Connection timed out")
+            all_ok = False
+
+    # Check mapping file
+    print("[4] Mapping file...", end=" ", flush=True)
+    mapping = load_mapping()
+    if not mapping:
+        print("EMPTY (no mappings yet)")
+        warnings.append("mapping")
+    else:
+        print(f"OK ({len(mapping)} account mappings)")
+
+    print()
+    print("=" * 50)
+    if all_ok:
+        print("All connectivity checks passed!")
+    else:
+        print("Some checks FAILED. Fix the issues above before syncing.")
+
+    if "mapping" in warnings:
+        print()
+        print("NOTE: No account mappings found yet.")
+        print("      You have two options:")
+        print("      1. Run sync and enter mappings when prompted")
+        print("      2. Auto-build from Unit4 history:")
+        print("         python build_mapping_from_history.py")
+    print("=" * 50)
+    print()
+
+    return all_ok
 
 
 def process_worklogs(
@@ -152,7 +263,10 @@ async def sync(week: str, cutover: str | None, execute: bool):
     print()
 
     # Load config and mapping
-    config = load_config()
+    config = load_config_safe()
+    if config is None:
+        return
+
     mapping = load_mapping()
     unit4_url = config.get("unit4", {}).get("url")
     if not unit4_url:
@@ -173,11 +287,19 @@ async def sync(week: str, cutover: str | None, execute: bool):
     print()
     print(f"[1] Fetching Tempo worklogs ({date_from} to {date_to})...")
 
-    jira = JiraClient(config)
-    tempo = TempoClient(config)
+    try:
+        jira = JiraClient(config)
+        tempo = TempoClient(config)
 
-    account_id = jira.get_my_account_id()
-    raw_worklogs = tempo.fetch_worklogs(account_id, date_from, date_to)
+        account_id = jira.get_my_account_id()
+        raw_worklogs = tempo.fetch_worklogs(account_id, date_from, date_to)
+    except ApiError as e:
+        print()
+        print(f"[!] API Error: {e}")
+        print()
+        print("    Run 'python sync_tempo_to_unit4.py --check' to diagnose the issue.")
+        return
+
     print(f"    Found {len(raw_worklogs)} worklogs")
 
     # Process worklogs
@@ -187,6 +309,7 @@ async def sync(week: str, cutover: str | None, execute: bool):
     print(f"    Valid: {len(valid_worklogs)}, Unmapped: {len(unmapped_worklogs)}")
 
     # Handle unmapped worklogs interactively
+    skipped_count = 0
     if unmapped_worklogs:
         print()
         print("[!] Found unmapped worklogs. Enter ArbAuft or SKIP:")
@@ -195,6 +318,8 @@ async def sync(week: str, cutover: str | None, execute: bool):
             if arbauft:
                 wl.arbauft = arbauft
                 valid_worklogs.append(wl)
+            else:
+                skipped_count += 1
 
     # Show summary
     print()
@@ -324,6 +449,40 @@ async def sync(week: str, cutover: str | None, execute: bool):
                 print("    [!] Click Speichern manually")
                 await asyncio.get_event_loop().run_in_executor(None, input)
 
+        # Print final summary
+        print()
+        print("=" * 50)
+        print("SUMMARY")
+        print("=" * 50)
+        if dry_run:
+            print(f"  Mode:     DRY-RUN (no changes made)")
+            print(f"  Would delete: {len(existing_entries)} entries")
+            print(f"  Would create: {len(valid_worklogs)} entries")
+        else:
+            deleted_count = len(existing_entries)
+            created_count = len(valid_worklogs) - len(errors)
+            failed_count = len(errors)
+            print(f"  Deleted:  {deleted_count} entries")
+            print(f"  Created:  {created_count} entries")
+            if failed_count > 0:
+                print(f"  Failed:   {failed_count} entries")
+        print(f"  Skipped:  {skipped_count} worklogs (no mapping)")
+
+        if skipped_count > 0:
+            print()
+            print("[!] WARNING: Some worklogs were SKIPPED (not synced to Unit4)!")
+            print()
+            print("    These worklogs have Tempo accounts without a Unit4 ArbAuft mapping.")
+            print("    To sync them, you need to add the mapping. Options:")
+            print()
+            print("    1. Run sync again and enter the ArbAuft when prompted")
+            print("       (instead of typing SKIP, enter the ArbAuft code)")
+            print()
+            print("    2. Auto-build mappings from your Unit4 history:")
+            print("       python build_mapping_from_history.py")
+            print()
+            print("    3. Manually edit account_to_arbauft_mapping.json")
+
         print()
         print("[*] Press ENTER to close browser...")
         try:
@@ -341,6 +500,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+    # Check connectivity first
+    python sync_tempo_to_unit4.py --check
+
     # Dry-run (default) - shows what would happen
     python sync_tempo_to_unit4.py 202605
 
@@ -359,8 +521,21 @@ Examples:
         "--execute", action="store_true", help="Actually execute changes (default: dry-run)"
     )
     parser.add_argument("--cutover", help="Only sync from this date onwards (YYYY-MM-DD)")
+    parser.add_argument(
+        "--check", action="store_true", help="Check connectivity to all services and exit"
+    )
 
     args = parser.parse_args()
+
+    # Load config first (needed for --check and sync)
+    config = load_config_safe()
+    if config is None:
+        return 1
+
+    # Handle --check mode
+    if args.check:
+        success = check_connectivity(config)
+        return 0 if success else 1
 
     week = args.week or get_current_week()
 

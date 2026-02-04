@@ -112,6 +112,20 @@ class Unit4Browser:
         if self._playwright:
             await self._playwright.stop()
 
+    async def check_session_valid(self) -> bool:
+        """Quick check if session is still valid.
+
+        Returns:
+            True if session appears valid, False if login is required.
+        """
+        try:
+            title = await self.page.title()
+            if "Login" in title or "Anmelden" in title:
+                return False
+            return True
+        except Exception:
+            return False
+
     async def navigate_to_zeiterfassung(self) -> Frame:
         """Login to Unit4 and navigate to Zeiterfassung."""
         print("[*] Opening Unit4...")
@@ -119,10 +133,12 @@ class Unit4Browser:
         await self.page.wait_for_load_state("networkidle")
         await asyncio.sleep(2)
 
-        if "Login" in await self.page.title():
-            print("[!] Please log in (2FA), then ENTER...")
+        if not await self.check_session_valid():
+            print("[!] Session expired or not logged in.")
+            print("    Please log in (2FA may be required), then press ENTER...")
             await asyncio.get_event_loop().run_in_executor(None, input)
             await self._context.storage_state(path=SESSION_FILE)
+            print("    Session saved for future use.")
             await asyncio.sleep(2)
 
         # Navigate to Zeiterfassung
@@ -288,9 +304,13 @@ class Unit4Browser:
                     try:
                         row = inp.locator("xpath=ancestor::tr[1]")
                         if await row.count() > 0:
-                            row_text = val + " " + await row.inner_text(timeout=500)
-                    except Exception:
-                        pass
+                            row_inner = await row.inner_text(timeout=500)
+                            row_text = val + " " + row_inner
+                            if debug:
+                                print(f"    [DEBUG] Row text for input: {row_inner[:80]}...")
+                    except Exception as e:
+                        if debug:
+                            print(f"    [DEBUG] Could not read row: {e}")
 
                     entry = await self._parse_text_to_entry(row_text, seen_wl_ids, debug, "input")
                     if entry:

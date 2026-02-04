@@ -1,0 +1,24 @@
+#!/bin/bash
+# Wrapper script for sync_tempo_to_unit4.py
+# Automatically activates the virtual environment
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Check if setup was run
+if [ ! -d ".venv" ]; then
+    echo "[!] ERROR: Virtual environment not found!"
+    echo "    Run './setup.sh' first to set up the project."
+    exit 1
+fi
+
+# Check if config exists
+if [ ! -f "config.json" ]; then
+    echo "[!] ERROR: config.json not found!"
+    echo "    Copy config.example.json to config.json and fill in your credentials."
+    exit 1
+fi
+
+# Activate venv and run
+source .venv/bin/activate
+exec python sync_tempo_to_unit4.py "$@"

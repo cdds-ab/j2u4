@@ -20,6 +20,74 @@ def load_config() -> dict:
         return json.load(f)
 
 
+def validate_config(config: dict) -> list[str]:
+    """Validate config structure and return list of error messages.
+
+    Returns:
+        Empty list if valid, otherwise list of error messages.
+    """
+    errors = []
+
+    # Check required sections
+    for section in ["jira", "tempo", "unit4"]:
+        if section not in config:
+            errors.append(f"Missing section '{section}' in config.json")
+
+    # Check Jira credentials
+    if "jira" in config:
+        for key in ["base_url", "user_email", "api_token"]:
+            if not config["jira"].get(key):
+                errors.append(f"Missing jira.{key}")
+
+    # Check Tempo
+    if "tempo" in config:
+        if not config["tempo"].get("api_token"):
+            errors.append("Missing tempo.api_token")
+
+    # Check Unit4
+    if "unit4" in config:
+        if not config["unit4"].get("url"):
+            errors.append("Missing unit4.url")
+
+    return errors
+
+
+def load_config_safe() -> dict | None:
+    """Load config with user-friendly error messages.
+
+    Returns:
+        Config dict if valid, None if errors occurred.
+    """
+    if not os.path.exists(CONFIG_FILE):
+        print("[!] ERROR: config.json not found!")
+        print()
+        print("    Create config.json based on config.example.json:")
+        print("    $ cp config.example.json config.json")
+        print("    $ nano config.json  # Fill in your credentials")
+        print()
+        return None
+
+    try:
+        config = load_config()
+    except json.JSONDecodeError as e:
+        print("[!] ERROR: config.json is not valid JSON!")
+        print(f"    Line {e.lineno}, column {e.colno}: {e.msg}")
+        print()
+        print("    Check for missing commas, quotes, or brackets.")
+        return None
+
+    errors = validate_config(config)
+    if errors:
+        print("[!] ERROR: config.json is incomplete:")
+        for err in errors:
+            print(f"    - {err}")
+        print()
+        print("    See config.example.json for the required structure.")
+        return None
+
+    return config
+
+
 def load_mapping() -> dict:
     """Load account-to-arbauft mapping."""
     if os.path.exists(MAPPING_FILE):
