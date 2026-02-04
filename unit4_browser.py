@@ -283,7 +283,16 @@ class Unit4Browser:
             try:
                 val = await inp.input_value(timeout=100)
                 if val and "[WL:" in val:
-                    entry = await self._parse_text_to_entry(val, seen_wl_ids, debug, "input")
+                    # Also read the whole row to find ticket key
+                    row_text = val
+                    try:
+                        row = inp.locator("xpath=ancestor::tr[1]")
+                        if await row.count() > 0:
+                            row_text = val + " " + await row.inner_text(timeout=500)
+                    except Exception:
+                        pass
+
+                    entry = await self._parse_text_to_entry(row_text, seen_wl_ids, debug, "input")
                     if entry:
                         entries.append(entry)
             except Exception:
