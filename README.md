@@ -194,8 +194,8 @@ This opens Unit4, scans the specified weeks, and builds the mapping automaticall
 When the script encounters an unknown Tempo account, it will prompt you:
 
 ```
-Unknown Account: 42 (ACME - DevOps)
-  Ticket: ACME-11578
+Unknown Account: 42 (ACME - Development)
+  Ticket: ACME-1234
   Summary: Fix deployment pipeline
 
 Enter ArbAuft (e.g., 1234-56789-001) or SKIP to skip:
@@ -211,8 +211,8 @@ Edit `account_to_arbauft_mapping.json` directly:
 {
   "42": {
     "unit4_arbauft": "1234-56789-001",
-    "tempo_name": "ACME - DevOps",
-    "sample_ticket": "ACME-11578"
+    "tempo_name": "ACME - Development",
+    "sample_ticket": "ACME-1234"
   }
 }
 ```
