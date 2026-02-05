@@ -2,6 +2,19 @@
 
 Sync Tempo worklogs to Unit4 Zeiterfassung via Playwright browser automation.
 
+## Disclaimer
+
+**USE AT YOUR OWN RISK.** This software is provided "as is" without warranty of any kind.
+
+CDDS AB and the contributors to this project:
+- Make no guarantees about the correctness, reliability, or suitability of this software
+- Accept no liability for any damages, data loss, or other issues arising from its use
+- Provide no support or maintenance obligations
+
+This tool automates browser interactions with Unit4, which may break at any time due to UI changes. Always verify your time entries manually in Unit4 after syncing.
+
+By using this software, you acknowledge that you are solely responsible for any consequences of its use.
+
 ## Requirements
 
 | Requirement | Version | Notes |
@@ -268,3 +281,7 @@ It's the "ArbAuft" field in the entry form.
 - **Never commit** `config.json` or `session.json`
 - These files are in `.gitignore`
 - Use `config.example.json` as template
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
