@@ -1,4 +1,4 @@
-# jira2unit4
+# j2u4
 
 Sync Tempo worklogs to Unit4 Zeiterfassung via Playwright browser automation.
 
@@ -28,7 +28,7 @@ wsl --install
 ```bash
 # 1. Clone and setup
 git clone <repo-url>
-cd jira2unit4
+cd j2u4
 ./setup.sh
 
 # 2. Edit config.json with your API tokens

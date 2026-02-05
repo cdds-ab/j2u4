@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup script for jira2unit4
+# Setup script for j2u4
 # Run once after cloning the repository
 
 set -e
@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "========================================"
-echo "jira2unit4 Setup"
+echo "j2u4 Setup"
 echo "========================================"
 echo
 
