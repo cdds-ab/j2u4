@@ -222,9 +222,9 @@ async def main(weeks_to_scan: list[str]):
 
         if os.path.exists(SESSION_FILE):
             print("[*] Loading session...")
-            context = await browser.new_context(storage_state=SESSION_FILE)
+            context = await browser.new_context(storage_state=SESSION_FILE, locale='de')
         else:
-            context = await browser.new_context()
+            context = await browser.new_context(locale='de')
 
         page = await context.new_page()
 
