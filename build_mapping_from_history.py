@@ -113,19 +113,24 @@ async def extract_entries_from_week(frame: Frame, page: Page, known_arbaufts: se
 
         for row in rows:
             try:
-                # Get all cells in this row
-                cells = await row.locator("td").all()
+                # Get only direct child cells (avoid nested table tds)
+                cells = await row.locator(":scope > td").all()
                 if len(cells) < 10:
                     continue
 
-                # Try to find Ticketno and ArbAuft in the cells
-                row_text = await row.inner_text(timeout=500)
-
-                # Look for ticket pattern (e.g., PROJ-123, ACME-456)
-                ticket_match = re.search(r"([A-Z]{3,10}-\d+)", row_text)
-
-                # Look for ArbAuft pattern (e.g., 1234-56789-001)
-                arbauft_match = re.search(r"(\d{4}-\d{5}-\d{3})", row_text)
+                # Extract ticket and ArbAuft from individual cells
+                ticket_match = None
+                arbauft_match = None
+                for cell in cells:
+                    cell_text = await cell.inner_text(timeout=500)
+                    if not ticket_match:
+                        m = re.search(r"([A-Z]{3,10}-\d+)", cell_text)
+                        if m:
+                            ticket_match = m
+                    if not arbauft_match:
+                        m = re.search(r"(\d{4}-\d{5}-\d{3})", cell_text)
+                        if m:
+                            arbauft_match = m
 
                 if ticket_match and arbauft_match:
                     arbauft = arbauft_match.group(1)
