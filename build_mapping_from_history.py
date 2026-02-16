@@ -85,7 +85,7 @@ async def set_week(frame: Frame, page: Page, week: str) -> bool:
     """Set the week in Unit4."""
     print(f"    Setting week {week}...", end=" ", flush=True)
     try:
-        week_input = frame.get_by_label("Woche", exact=False).first
+        week_input = frame.get_by_label("Period*", exact=True)
         if await week_input.count() > 0:
             await week_input.click(timeout=3000, force=True)
             await week_input.press("Control+a")
@@ -243,7 +243,7 @@ async def main(weeks_to_scan: list[str]):
         # === NAVIGATION ===
         print("[*] Opening Zeiterfassung...")
         try:
-            menu = page.get_by_text("Zeiterfassung - Standard", exact=True).first
+            menu = page.get_by_text("Timesheets - standard", exact=True).first
             if await menu.count() > 0:
                 await menu.click(timeout=5000)
         except Exception:
