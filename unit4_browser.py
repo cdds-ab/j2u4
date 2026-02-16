@@ -98,9 +98,10 @@ class Unit4Browser:
             self._context = await self._browser.new_context(
                 storage_state=SESSION_FILE,
                 no_viewport=True,
+                locale='de',
             )
         else:
-            self._context = await self._browser.new_context(no_viewport=True)
+            self._context = await self._browser.new_context(no_viewport=True, locale='de')
 
         self._page = await self._context.new_page()
         self._frame_manager = FrameManager(self._page)
