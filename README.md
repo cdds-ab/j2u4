@@ -278,8 +278,13 @@ It's the "ArbAuft" field in the entry form.
 - If issues persist, delete `session.json` and run again
 
 ### Unit4 language
-- The browser automation expects the **German** Unit4 UI (e.g., button labels like "Ergänzen")
+- The browser automation currently expects the **German** Unit4 UI (e.g., button labels like "Ergänzen")
 - If your Unit4 is set to English, switch the language to German in your Unit4 profile settings
+- To help us add English support, run the UI inspector and share the output:
+  ```bash
+  uv run python inspect_ui.py
+  ```
+  This opens Unit4, scans all UI elements, and saves their HTML attributes to `ui_inspection.json`.
 
 ## Security
 

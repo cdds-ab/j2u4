@@ -2,6 +2,7 @@
 config.json
 session.json
 account_to_arbauft_mapping.json
+ui_inspection.json
 
 # Python
 __pycache__/
