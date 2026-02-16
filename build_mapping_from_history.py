@@ -21,6 +21,7 @@ import asyncio
 import json
 import os
 import re
+from collections import defaultdict
 from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, Page, Frame
 import requests
@@ -289,8 +290,7 @@ async def main(weeks_to_scan: list[str]):
     # === FETCH JIRA ACCOUNTS ===
     print(f"\n[*] Fetching Jira Account field for {len(unique_entries)} new entries...")
 
-    # Count occurrences: account_key -> {arbauft -> count}
-    from collections import defaultdict
+    # Collect: account_key -> {arbauft -> count}
     account_arbauft_counts = defaultdict(lambda: defaultdict(int))
     account_names = {}
 
@@ -312,29 +312,71 @@ async def main(weeks_to_scan: list[str]):
         else:
             print("(no account found)")
 
-    # Resolve conflicts: majority wins
-    print("\n[*] Resolving mappings (majority wins)...")
+    # Resolve mappings (flag conflicts for user)
+    conflicts = []
+    print("\n[*] Resolving mappings...")
     for account_key, arbauft_counts in account_arbauft_counts.items():
+        account_name = account_names.get(account_key, "?")
+
         if account_key in mapping:
-            # Already have this account - add to counts
             existing_arbauft = mapping[account_key]["unit4_arbauft"]
-            arbauft_counts[existing_arbauft] += 1  # Give existing mapping a vote
+            # Check if new scan found a different ArbAuft
+            new_arbaufts = set(arbauft_counts.keys())
+            if new_arbaufts == {existing_arbauft}:
+                # Consistent with existing mapping, just update metadata
+                mapping[account_key]["tempo_name"] = account_name
+                continue
+            # Conflict with existing mapping
+            new_arbaufts.add(existing_arbauft)
+            if len(new_arbaufts) > 1:
+                conflicts.append((account_key, account_name, sorted(new_arbaufts)))
+                continue
 
-        # Find the most common ArbAuft
-        best_arbauft = max(arbauft_counts.keys(), key=lambda a: arbauft_counts[a])
-        total_votes = sum(arbauft_counts.values())
+        new_arbaufts = list(arbauft_counts.keys())
+        if len(new_arbaufts) > 1:
+            # Multiple different ArbAufts found in scan
+            conflicts.append((account_key, account_name, sorted(new_arbaufts)))
+            continue
 
-        if len(arbauft_counts) > 1:
-            # There was a conflict
-            votes_str = ", ".join([f"{a}: {c}" for a, c in sorted(arbauft_counts.items())])
-            print(f"    {account_key}: {votes_str} -> winner: {best_arbauft}")
-
+        # Unambiguous: exactly one ArbAuft
         mapping[account_key] = {
-            "unit4_arbauft": best_arbauft,
-            "tempo_name": account_names.get(account_key, mapping.get(account_key, {}).get("tempo_name", "?")),
-            "vote_count": arbauft_counts[best_arbauft],
-            "total_seen": total_votes,
+            "unit4_arbauft": new_arbaufts[0],
+            "tempo_name": account_name,
         }
+
+    # === HANDLE CONFLICTS ===
+    if conflicts:
+        print()
+        print("=" * 70)
+        print(f"CONFLICTS ({len(conflicts)} accounts have multiple ArbAufts)")
+        print("=" * 70)
+        print()
+        print("These accounts were found with different ArbAuft codes.")
+        print("Please choose the correct one for each:\n")
+
+        for account_key, account_name, arbaufts in conflicts:
+            print(f"  Account {account_key} ({account_name}):")
+            for i, a in enumerate(arbaufts, 1):
+                existing = " (current)" if account_key in mapping and mapping[account_key]["unit4_arbauft"] == a else ""
+                print(f"    [{i}] {a}{existing}")
+
+            while True:
+                choice = input(f"  Choose [1-{len(arbaufts)}] or SKIP: ").strip()
+                if choice.upper() == "SKIP":
+                    print(f"  -> Skipped\n")
+                    break
+                try:
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(arbaufts):
+                        mapping[account_key] = {
+                            "unit4_arbauft": arbaufts[idx],
+                            "tempo_name": account_name,
+                        }
+                        print(f"  -> {arbaufts[idx]}\n")
+                        break
+                except ValueError:
+                    pass
+                print(f"  Invalid input. Enter 1-{len(arbaufts)} or SKIP.")
 
     # === SAVE RESULTS ===
     print()
