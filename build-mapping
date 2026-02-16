@@ -5,13 +5,6 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Check if setup was run
-if [ ! -d ".venv" ]; then
-    echo "[!] ERROR: Virtual environment not found!"
-    echo "    Run './setup.sh' first to set up the project."
-    exit 1
-fi
-
 # Check if config exists
 if [ ! -f "config.json" ]; then
     echo "[!] ERROR: config.json not found!"
@@ -30,6 +23,4 @@ echo
 echo "Press ENTER to continue or Ctrl+C to cancel..."
 read
 
-# Activate venv and run
-source .venv/bin/activate
-exec python build_mapping_from_history.py "$@"
+exec uv run python build_mapping_from_history.py "$@"

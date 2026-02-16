@@ -17,12 +17,13 @@ By using this software, you acknowledge that you are solely responsible for any 
 
 ## Requirements
 
-| Requirement | Version | Notes |
-|-------------|---------|-------|
-| **OS** | Linux / macOS | Windows: use WSL (see below) |
-| **Python** | 3.11+ | |
-| **Node.js** | 18+ | Required for Playwright |
-| **Network** | VPN | If required for Unit4 access |
+| Requirement | Notes |
+|-------------|-------|
+| **OS** | Linux / macOS (Windows: use WSL, see below) |
+| **uv** | Python package manager ([install](https://docs.astral.sh/uv/getting-started/installation/)) |
+| **Network** | VPN if required for Unit4 access |
+
+> **Note:** Python is managed automatically by `uv` — no manual installation needed.
 
 ### Windows Users
 
@@ -39,6 +40,9 @@ wsl --install
 ## Quick Start
 
 ```bash
+# 0. Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
 # 1. Clone and setup
 git clone <repo-url>
 cd j2u4
@@ -78,8 +82,7 @@ Playwright ──→ Unit4 Zeiterfassung (browser automation)
 ```
 
 This will:
-- Create a Python virtual environment
-- Install all dependencies
+- Install Python and all dependencies (via `uv`)
 - Install Chromium for browser automation
 - Create `config.json` from template
 
@@ -87,10 +90,8 @@ This will:
 
 1. **Install dependencies**
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   playwright install chromium
+   uv sync
+   uv run playwright install chromium
    ```
 
 2. **Create config file**

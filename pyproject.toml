@@ -1,0 +1,9 @@
+[project]
+name = "j2u4"
+version = "0.1.0"
+description = "Sync Tempo worklogs to Unit4 Zeiterfassung via Playwright browser automation"
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.40.0",
+    "requests>=2.31.0",
+]
