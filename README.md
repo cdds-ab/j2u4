@@ -277,6 +277,10 @@ It's the "ArbAuft" field in the entry form.
 - The script will detect this and prompt for re-login
 - If issues persist, delete `session.json` and run again
 
+### Unit4 language
+- The browser automation expects the **German** Unit4 UI (e.g., button labels like "Ergänzen")
+- If your Unit4 is set to English, switch the language to German in your Unit4 profile settings
+
 ## Security
 
 - **Never commit** `config.json` or `session.json`
