@@ -14,6 +14,27 @@ from utils import SESSION_FILE
 TIMEOUT = 10000  # 10 seconds
 DAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
+# Bilingual day abbreviation pattern (DE + EN)
+DAY_ABBREV_PATTERN = r"(Mo|Di|Mi|Do|Fr|Sa|So|Mon|Tue|Wed|Thu|Fri|Sat|Sun)"
+
+# Locale-dependent strings for elements without stable IDs
+LOCALE_STRINGS = {
+    "de": {
+        "status_locked": ["Bereit", "Transferiert", "Gesendet"],
+        "confirm_yes": "Ja",
+        "cancel": "Abbrechen",
+        "menu_text": "Zeiterfassung - Standard",
+        "time_details": "Zeitdetails",
+    },
+    "en": {
+        "status_locked": ["Ready", "Transferred", "Sent"],
+        "confirm_yes": "Yes",
+        "cancel": "Cancel",
+        "menu_text": "Timesheets - standard",
+        "time_details": "Time details",
+    },
+}
+
 
 class FrameManager:
     """Manages frame navigation within Unit4."""
@@ -33,10 +54,10 @@ class FrameManager:
                 self._content_frame = frame
                 return frame
 
-        # Fallback: find frame that contains the "Woche" field
+        # Fallback: find frame that contains the week/period input field
         for frame in self.page.frames:
             try:
-                week_field = frame.get_by_label("Woche", exact=False).first
+                week_field = frame.locator("input[id*='1548_Editor']").first
                 if await week_field.count() > 0:
                     self._content_frame = frame
                     return frame
@@ -142,14 +163,22 @@ class Unit4Browser:
             print("    Session saved for future use.")
             await asyncio.sleep(2)
 
-        # Navigate to Zeiterfassung
+        # Navigate to Zeiterfassung (try both DE and EN menu text)
         print("[*] Opening Zeiterfassung...", end=" ", flush=True)
-        try:
-            menu = self.page.get_by_text("Zeiterfassung - Standard", exact=True).first
-            if await menu.count() > 0:
-                await menu.click(timeout=5000)
-                print("clicked...", end=" ", flush=True)
-        except Exception:
+        clicked = False
+        for locale in ("de", "en"):
+            if clicked:
+                break
+            try:
+                menu_text = LOCALE_STRINGS[locale]["menu_text"]
+                menu = self.page.get_by_text(menu_text, exact=True).first
+                if await menu.count() > 0:
+                    await menu.click(timeout=5000)
+                    print("clicked...", end=" ", flush=True)
+                    clicked = True
+            except Exception:
+                continue
+        if not clicked:
             print()
             print("[!] Navigate to Zeiterfassung manually, then ENTER...")
             try:
@@ -161,12 +190,12 @@ class Unit4Browser:
         print("waiting...", end=" ", flush=True)
         await self.page.wait_for_load_state("networkidle")
 
-        # Wait until "Woche" field is visible
+        # Wait until week/period input field is visible
         frame = None
         for i in range(15):
             frame = await self.frame_manager.get_content_frame(refresh=True)
             try:
-                week_field = frame.get_by_label("Woche", exact=False).first
+                week_field = frame.locator("input[id*='1548_Editor']").first
                 if await week_field.count() > 0 and await week_field.is_visible(timeout=500):
                     print("OK")
                     return frame
@@ -187,12 +216,13 @@ class Unit4Browser:
             try:
                 frame = await self.frame_manager.get_content_frame(refresh=attempt > 0)
 
-                # Try multiple ways to find the week input
+                # Try multiple ways to find the week/period input
                 week_input = None
                 strategies = [
+                    lambda: frame.locator("input[id*='1548_Editor']").first,
                     lambda: frame.get_by_label("Woche", exact=False).first,
+                    lambda: frame.get_by_label("Period", exact=False).first,
                     lambda: frame.locator("input[id*='week']").first,
-                    lambda: frame.locator("input[name*='week']").first,
                 ]
 
                 for strategy in strategies:
@@ -434,16 +464,24 @@ class Unit4Browser:
             print()
             print(f"    Marked {marked_count} entries.")
             print("    >>> Check the browser - are all entries marked correctly?")
-            print("    >>> Press ENTER to click 'Löschen', or Ctrl+C to abort...")
+            print("    >>> Press ENTER to delete, or Ctrl+C to abort...")
             try:
                 await asyncio.get_event_loop().run_in_executor(None, input)
             except EOFError:
                 pass
 
-            print("    Clicking 'Löschen'...", end=" ", flush=True)
-            if await self._click_button(frame, "Löschen"):
+            print("    Clicking delete...", end=" ", flush=True)
+            deleted = await self._click_by_id(frame, "button[id$='_deleteButton']")
+            if not deleted:
+                deleted = await self._click_button(frame, "Löschen")
+                if not deleted:
+                    deleted = await self._click_button(frame, "Delete")
+            if deleted:
                 await asyncio.sleep(3)
-                await self._click_button(frame, "Ja")
+                # Confirm dialog (Yes/Ja)
+                for locale in ("de", "en"):
+                    if await self._click_button(frame, LOCALE_STRINGS[locale]["confirm_yes"]):
+                        break
                 await self._click_button(frame, "OK")
                 await asyncio.sleep(2)
                 print("deleted...", end=" ", flush=True)
@@ -539,75 +577,109 @@ class Unit4Browser:
 
         frame = await self.frame_manager.get_content_frame()
 
-        # Click "Ergänzen" to create new row
-        if not await self._click_button(frame, "Ergänzen"):
-            print("FAILED (no Ergänzen)")
+        # Click "Add"/"Ergänzen" button (ID-based, then text fallback)
+        added = await self._click_by_id(frame, "button[id$='_newButton']")
+        if not added:
+            added = await self._click_button(frame, "Ergänzen")
+            if not added:
+                added = await self._click_button(frame, "Add")
+        if not added:
+            print("FAILED (no Add/Ergänzen button)")
             return False
         await asyncio.sleep(1)
 
-        # Click first zoom icon (new row)
+        # Click first zoom icon (new row) — ID-based
         try:
-            zoom_icons = await frame.locator("[title*='Detail']").all()
-            if zoom_icons:
-                await zoom_icons[0].click(timeout=TIMEOUT)
+            zoom_btn = frame.locator("button[id$='_zoom']").first
+            if await zoom_btn.count() > 0:
+                await zoom_btn.click(timeout=TIMEOUT)
             else:
-                print("FAILED (no zoom)")
-                return False
+                # Fallback: title-based
+                zoom_icons = await frame.locator("[title*='Detail']").all()
+                if zoom_icons:
+                    await zoom_icons[0].click(timeout=TIMEOUT)
+                else:
+                    print("FAILED (no zoom)")
+                    return False
         except Exception as e:
             print(f"FAILED (zoom: {e})")
             return False
         await asyncio.sleep(3)
 
-        # Fill form fields
+        # Fill form fields (ID-based with label fallback)
         print("filling ArbAuft...", end=" ", flush=True)
-        arbauft_ok = await self._fill_field(frame, "ArbAuft", worklog.arbauft)
+        arbauft_ok = await self._fill_field_by_id(frame, "input[id*='1574_Editor']", worklog.arbauft)
+        if not arbauft_ok:
+            arbauft_ok = await self._fill_field(frame, "ArbAuft", worklog.arbauft)
+            if not arbauft_ok:
+                arbauft_ok = await self._fill_field(frame, "Work order", worklog.arbauft)
         print("OK" if arbauft_ok else "FAIL", end=" | ", flush=True)
         await asyncio.sleep(1)
 
         print("Aktivität...", end=" ", flush=True)
-        aktivitaet_ok = await self._fill_field(frame, "Aktivität", "TEMPO")
+        aktivitaet_ok = await self._fill_field_by_id(frame, "input[id*='1576_Editor']", "TEMPO")
+        if not aktivitaet_ok:
+            aktivitaet_ok = await self._fill_field(frame, "Aktivität", "TEMPO")
+            if not aktivitaet_ok:
+                aktivitaet_ok = await self._fill_field(frame, "Activity", "TEMPO")
         print("OK" if aktivitaet_ok else "FAIL", end=" | ", flush=True)
 
         print("Text...", end=" ", flush=True)
-        text_ok = await self._fill_field(frame, "Text", text)
+        text_ok = await self._fill_field_by_id(frame, "input[id*='description_i']", text)
+        if not text_ok:
+            text_ok = await self._fill_field(frame, "Text", text)
+            if not text_ok:
+                text_ok = await self._fill_field(frame, "Description", text)
         print("OK" if text_ok else "FAIL", end=" | ", flush=True)
 
         print("Ticketno...", end=" ", flush=True)
         ticketno_ok = await self._fill_field(frame, "Ticketno", worklog.issue_key)
+        if not ticketno_ok:
+            ticketno_ok = await self._fill_field(frame, "Ticket", worklog.issue_key)
         print("OK" if ticketno_ok else "FAIL")
 
         if not (arbauft_ok and text_ok):
             print(f"FAILED (ArbAuft={arbauft_ok}, Text={text_ok})")
-            await self._click_button(frame, "Abbrechen")
+            for locale in ("de", "en"):
+                if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
+                    break
             return False
 
         # Fill hours in Zeitdetails
         zeit_ok = await self._fill_hours_by_date(frame, worklog.hours, worklog.date)
         if not zeit_ok:
-            print("    [!] Zeit konnte nicht eingetragen werden - Eintrag wird abgebrochen")
-            await self._click_button(frame, "Abbrechen")
+            print("    [!] Could not fill hours - aborting entry")
+            for locale in ("de", "en"):
+                if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
+                    break
             return False
 
-        # Click OK to close dialog
-        ok_clicked = await self._click_button(frame, "OK")
+        # Click OK to close dialog (ID-based, then text fallback)
+        ok_clicked = await self._click_by_id(frame, "button[id$='s108_apply']")
+        if not ok_clicked:
+            ok_clicked = await self._click_button(frame, "OK")
         if not ok_clicked:
             await self.page.keyboard.press("Enter")
             await asyncio.sleep(1)
-            await self._click_button(frame, "Abbrechen")
+            for locale in ("de", "en"):
+                if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
+                    break
             await self._click_button(frame, "OK")
             print("FAILED (OK) - dialog closed")
             return False
 
         await asyncio.sleep(3)
 
-        # Verify dialog is closed
-        ergaenzen = frame.get_by_text("Ergänzen", exact=True).first
+        # Verify dialog is closed (ID-based check for Add button)
+        add_btn = frame.locator("button[id$='_newButton']").first
         for _ in range(10):
-            if await ergaenzen.count() > 0 and await ergaenzen.is_visible(timeout=500):
+            if await add_btn.count() > 0 and await add_btn.is_visible(timeout=500):
                 break
             await asyncio.sleep(0.5)
             await self._click_button(frame, "OK")
-            await self._click_button(frame, "Abbrechen")
+            for locale in ("de", "en"):
+                if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
+                    break
 
         await asyncio.sleep(1)
         print("OK")
@@ -658,7 +730,7 @@ class Unit4Browser:
             if date_str not in date_to_label:
                 if attempt < 4:
                     print(f"    Date {date_str} not in structure, retrying...", flush=True)
-                    zeit = frame.locator("text=/.*Zeitdetails/").first
+                    zeit = frame.locator("text=/.*(?:Zeitdetails|Time details)/").first
                     if await zeit.count() > 0:
                         await zeit.click(timeout=TIMEOUT)
                         await asyncio.sleep(1.5)
@@ -672,7 +744,7 @@ class Unit4Browser:
             print(f"    Zeitdetails ({day_name}): {hours_str}h ... ", end="", flush=True)
 
             try:
-                day_cell = frame.locator(f"text=/^{day_name} \\d/").first
+                day_cell = frame.locator(f"text=/^{re.escape(day_name)} \\d/").first
                 if await day_cell.count() == 0:
                     print(f"{day_name} not visible, retry...", flush=True)
                     continue
@@ -754,10 +826,11 @@ class Unit4Browser:
         """Expand the Zeitdetails section if collapsed."""
         print("    Expanding Zeitdetails...", end=" ", flush=True)
 
+        day_pat = DAY_ABBREV_PATTERN
         day_patterns = [
-            "text=/^(Mo|Di|Mi|Do|Fr|Sa|So) \\d+\\/\\d+/",
-            "text=/^(Mo|Di|Mi|Do|Fr|Sa|So) \\d+\\.\\d+/",
-            "text=/^(Mo|Di|Mi|Do|Fr|Sa|So)\\s+\\d/",
+            f"text=/^{day_pat} \\d+\\/\\d+/",
+            f"text=/^{day_pat} \\d+\\.\\d+/",
+            f"text=/^{day_pat}\\s+\\d/",
         ]
 
         async def check_expanded():
@@ -774,13 +847,17 @@ class Unit4Browser:
             print("already open")
             return True
 
-        # Click the Zeitdetails header
-        zeit_locators = [
-            frame.locator("legend:has-text('Zeitdetails')").first,
-            frame.locator("text=/[≫»▸▾].*Zeitdetails/").first,
-            frame.locator("text='Zeitdetails'").first,
-            frame.locator("div:has-text('Zeitdetails')").first,
-        ]
+        # Click the Zeitdetails / Time details header (try both locales)
+        zeit_locators = []
+        for locale in ("de", "en"):
+            td_text = LOCALE_STRINGS[locale]["time_details"]
+            zeit_locators.extend([
+                frame.locator(f"legend:has-text('{td_text}')").first,
+                frame.locator(f"text=/[≫»▸▾].*{td_text}/").first,
+                frame.locator(f"text='{td_text}'").first,
+            ])
+        zeit_locators.append(frame.locator("div:has-text('Zeitdetails')").first)
+        zeit_locators.append(frame.locator("div:has-text('Time details')").first)
 
         for locator in zeit_locators:
             try:
@@ -811,7 +888,7 @@ class Unit4Browser:
         date_to_label = {}
 
         try:
-            day_rows = await frame.locator("text=/^(Mo|Di|Mi|Do|Fr|Sa|So) \\d+\\/\\d+/").all()
+            day_rows = await frame.locator(f"text=/^{DAY_ABBREV_PATTERN} \\d+\\/\\d+/").all()
 
             for row in day_rows:
                 try:
@@ -843,6 +920,33 @@ class Unit4Browser:
 
         return date_to_label
 
+    async def _click_by_id(self, frame: Frame, selector: str) -> bool:
+        """Click an element by CSS selector (typically ID-based)."""
+        try:
+            elem = frame.locator(selector).first
+            if await elem.count() > 0 and await elem.is_visible(timeout=1000):
+                await elem.click(timeout=TIMEOUT)
+                return True
+        except Exception:
+            pass
+        return False
+
+    async def _fill_field_by_id(self, frame: Frame, selector: str, value: str) -> bool:
+        """Fill a form field by CSS selector (typically ID-based)."""
+        try:
+            elem = frame.locator(selector).first
+            if await elem.count() > 0 and await elem.first.is_visible(timeout=1000):
+                await elem.click(timeout=TIMEOUT)
+                await asyncio.sleep(0.2)
+                await elem.press("Control+a")
+                await elem.fill(value, timeout=TIMEOUT)
+                await self.page.keyboard.press("Tab")
+                await asyncio.sleep(0.3)
+                return True
+        except Exception:
+            pass
+        return False
+
     async def _click_button(self, frame: Frame, text: str) -> bool:
         """Find and click a button by text."""
         strategies = [
@@ -867,9 +971,16 @@ class Unit4Browser:
         """Save changes in Unit4."""
         frame = await self.frame_manager.get_content_frame()
 
-        saved = await self._click_button(frame, "Speichern")
+        # Try ID-based save first, then text fallbacks (DE + EN)
+        saved = await self._click_by_id(frame, "a[id$='tblsysSave']")
+        if not saved:
+            saved = await self._click_button(frame, "Speichern")
+        if not saved:
+            saved = await self._click_button(frame, "Save")
         if not saved:
             saved = await self._click_button(self.page, "Speichern")
+        if not saved:
+            saved = await self._click_button(self.page, "Save")
         if not saved:
             await self.page.keyboard.press("Control+s")
             saved = True
@@ -898,30 +1009,32 @@ class Unit4Browser:
             if is_submitted:
                 return False
 
-            # Check for Ergänzen button (editable state)
-            ergaenzen_btn = frame.get_by_text("Ergänzen", exact=True).first
-            if await ergaenzen_btn.count() > 0 and await ergaenzen_btn.is_visible(timeout=1000):
+            # Check for Add/Ergänzen button (editable state) — ID-based first
+            add_btn = frame.locator("button[id$='_newButton']").first
+            if await add_btn.count() > 0 and await add_btn.is_visible(timeout=1000):
                 print("OK")
                 return True
             await asyncio.sleep(1)
             if i == 9:
-                print("TIMEOUT - 'Ergänzen' button not found!")
+                print("TIMEOUT - Add/Ergänzen button not found!")
                 return False
 
         return False
 
     async def _is_week_submitted(self, frame: Frame) -> bool:
-        """Check if the week has already been submitted (Bereit/Transferiert)."""
-        # Check for status indicators that mean the week is locked
-        status_indicators = [
-            ("Bereit", "marked as ready"),
-            ("Transferiert", "already transferred"),
-            ("Gesendet", "already sent"),
-        ]
+        """Check if the week has already been submitted (Bereit/Transferiert/Ready/Transferred)."""
+        # Check for status indicators that mean the week is locked (DE + EN)
+        status_descriptions = {
+            "Bereit": "marked as ready",
+            "Transferiert": "already transferred",
+            "Gesendet": "already sent",
+            "Ready": "marked as ready",
+            "Transferred": "already transferred",
+            "Sent": "already sent",
+        }
 
-        for status_text, description in status_indicators:
+        for status_text, description in status_descriptions.items():
             try:
-                # Look for button or status text
                 elem = frame.get_by_text(status_text, exact=True).first
                 if await elem.count() > 0 and await elem.is_visible(timeout=500):
                     print(f"LOCKED ({description})")

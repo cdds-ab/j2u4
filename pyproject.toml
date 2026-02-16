@@ -7,3 +7,10 @@ dependencies = [
     "playwright>=1.40.0",
     "requests>=2.31.0",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py"]

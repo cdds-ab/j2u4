@@ -265,7 +265,7 @@ It's the "ArbAuft" field in the entry form.
 - Make sure you're connected to VPN (if required)
 - Check the URL in `config.json` is correct
 
-### "Page not loaded" / "Ergänzen not found"
+### "Page not loaded" / Add button not found
 - The script waits for the page to load, but Unit4 can be slow
 - If it times out, try running again
 
@@ -278,13 +278,33 @@ It's the "ArbAuft" field in the entry form.
 - If issues persist, delete `session.json` and run again
 
 ### Unit4 language
-- The browser automation currently expects the **German** Unit4 UI (e.g., button labels like "Ergänzen")
-- If your Unit4 is set to English, switch the language to German in your Unit4 profile settings
-- To help us add English support, run the UI inspector and share the output:
+- The browser automation works with both **German** and **English** Unit4 UI
+- Most selectors use stable element IDs; remaining text-based selectors try both languages automatically
+- If you encounter issues with a different UI language, run the UI inspector and share the output:
   ```bash
   uv run python inspect_ui.py
   ```
   This opens Unit4, scans all UI elements, and saves their HTML attributes to `ui_inspection.json`.
+
+## Testing
+
+Since Unit4 is a live enterprise system with no sandbox or staging environment, full end-to-end tests are not feasible. The test suite therefore focuses on what **can** be verified offline:
+
+```bash
+# Install dev dependencies (once)
+uv sync --extra dev
+
+# Run tests
+uv run pytest
+```
+
+**What is tested:**
+- Regex patterns (day labels, worklog markers, ticket keys, ArbAuft codes) against both German and English inputs
+- Locale configuration consistency (both locales define the same keys, non-empty values)
+
+**What requires manual verification:**
+- Browser automation against a live Unit4 instance (`./sync --check`, then `./sync YYYYWW`)
+- Session handling, login flow, 2FA
 
 ## Security
 

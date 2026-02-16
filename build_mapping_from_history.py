@@ -85,7 +85,12 @@ async def set_week(frame: Frame, page: Page, week: str) -> bool:
     """Set the week in Unit4."""
     print(f"    Setting week {week}...", end=" ", flush=True)
     try:
-        week_input = frame.get_by_label("Woche", exact=False).first
+        # Try ID-based selector first, then label fallback (DE + EN)
+        week_input = frame.locator("input[id*='1548_Editor']").first
+        if await week_input.count() == 0:
+            week_input = frame.get_by_label("Woche", exact=False).first
+        if await week_input.count() == 0:
+            week_input = frame.get_by_label("Period", exact=False).first
         if await week_input.count() > 0:
             await week_input.click(timeout=3000, force=True)
             await week_input.press("Control+a")
@@ -240,13 +245,20 @@ async def main(weeks_to_scan: list[str]):
             await context.storage_state(path=SESSION_FILE)
             await asyncio.sleep(2)
 
-        # === NAVIGATION ===
+        # === NAVIGATION (try DE and EN menu text) ===
         print("[*] Opening Zeiterfassung...")
-        try:
-            menu = page.get_by_text("Zeiterfassung - Standard", exact=True).first
-            if await menu.count() > 0:
-                await menu.click(timeout=5000)
-        except Exception:
+        clicked = False
+        for menu_text in ("Zeiterfassung - Standard", "Timesheets - standard"):
+            if clicked:
+                break
+            try:
+                menu = page.get_by_text(menu_text, exact=True).first
+                if await menu.count() > 0:
+                    await menu.click(timeout=5000)
+                    clicked = True
+            except Exception:
+                continue
+        if not clicked:
             print("[!] Navigate to Zeiterfassung manually, then ENTER...")
             await asyncio.get_event_loop().run_in_executor(None, input)
 
