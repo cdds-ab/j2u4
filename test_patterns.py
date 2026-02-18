@@ -42,6 +42,9 @@ class TestDayDatePattern:
             # Double-digit day/month
             ("Mo 27/01", "Mo", "27", "01"),
             ("Fri 14/11", "Fri", "14", "11"),
+            # Dot separator (locale=de date format)
+            ("Mo 3.02", "Mo", "3", "02"),
+            ("Fri 14.11", "Fri", "14", "11"),
         ],
     )
     def test_day_date_matches(self, label, expected_day, expected_month, expected_date):

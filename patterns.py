@@ -16,7 +16,7 @@ class Patterns:
     ARBAUFT = re.compile(r"(\d{4}-\d{5}-\d{3})")
 
     # Day row label in Zeitdetails: "Mo 1/26" or "Di 27/01" (DE + EN)
-    DAY_DATE = re.compile(r"^(Mo|Di|Mi|Do|Fr|Sa|So|Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d+)/(\d+)")
+    DAY_DATE = re.compile(r"^(Mo|Di|Mi|Do|Fr|Sa|So|Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d+)[/.](\d+)")
 
     # Week format: YYYYWW (e.g., 202605)
     WEEK_FORMAT = re.compile(r"^\d{6}$")

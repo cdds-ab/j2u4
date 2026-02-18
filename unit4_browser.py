@@ -27,7 +27,7 @@ LOCALE_STRINGS = {
         "time_details": "Zeitdetails",
     },
     "en": {
-        "status_locked": ["Ready", "Transferred", "Sent"],
+        "status_locked": ["Ready", "Transferred", "Sent", "Closed"],
         "confirm_yes": "Yes",
         "cancel": "Cancel",
         "menu_text": "Timesheets - standard",
@@ -888,7 +888,7 @@ class Unit4Browser:
         date_to_label = {}
 
         try:
-            day_rows = await frame.locator(f"text=/^{DAY_ABBREV_PATTERN} \\d+\\/\\d+/").all()
+            day_rows = await frame.locator(f"text=/^{DAY_ABBREV_PATTERN} \\d+[\\/.]\\d+/").all()
 
             for row in day_rows:
                 try:
@@ -1031,6 +1031,7 @@ class Unit4Browser:
             "Ready": "marked as ready",
             "Transferred": "already transferred",
             "Sent": "already sent",
+            "Closed": "already closed",
         }
 
         for status_text, description in status_descriptions.items():
