@@ -548,11 +548,13 @@ class Unit4Browser:
             if row and await row.count() > 0:
                 checkbox = row.locator("input[type='checkbox']").first
                 if await checkbox.count() > 0:
-                    await checkbox.evaluate("""el => {
-                        el.scrollIntoView({block: 'center', behavior: 'instant'});
-                        el.click();
-                    }""")
-                    await asyncio.sleep(0.3)
+                    already_checked = await checkbox.is_checked()
+                    if not already_checked:
+                        await checkbox.evaluate("""el => {
+                            el.scrollIntoView({block: 'center', behavior: 'instant'});
+                            el.click();
+                        }""")
+                        await asyncio.sleep(0.3)
                     print("marked")
                     return True
                 else:
