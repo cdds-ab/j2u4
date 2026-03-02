@@ -714,7 +714,7 @@ class Unit4Browser:
 
     async def _fill_hours_by_date(self, frame: Frame, hours: float, date_str: str) -> bool:
         """Fill hours for a specific date in Zeitdetails."""
-        hours_str = str(hours)
+        hours_str = str(hours).replace('.', ',')
         day_name = date_str
 
         for attempt in range(5):
