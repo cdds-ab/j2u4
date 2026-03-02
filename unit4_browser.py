@@ -640,18 +640,14 @@ class Unit4Browser:
 
         if not (arbauft_ok and text_ok):
             print(f"FAILED (ArbAuft={arbauft_ok}, Text={text_ok})")
-            for locale in ("de", "en"):
-                if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
-                    break
+            await self._cancel_and_recover(frame)
             return False
 
         # Fill hours in Zeitdetails
         zeit_ok = await self._fill_hours_by_date(frame, worklog.hours, worklog.date)
         if not zeit_ok:
             print("    [!] Could not fill hours - aborting entry")
-            for locale in ("de", "en"):
-                if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
-                    break
+            await self._cancel_and_recover(frame)
             return False
 
         # Click OK to close dialog (ID-based, then text fallback)
@@ -919,6 +915,24 @@ class Unit4Browser:
             print(f"    Error reading Zeitdetails structure: {e}")
 
         return date_to_label
+
+    async def _cancel_and_recover(self, frame: Frame) -> None:
+        """Cancel the current dialog and wait until the list view is ready."""
+        for locale in ("de", "en"):
+            if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
+                break
+        await asyncio.sleep(1)
+        # Confirm discard dialog if it appears (Ja/Yes)
+        for locale in ("de", "en"):
+            if await self._click_button(frame, LOCALE_STRINGS[locale]["confirm_yes"]):
+                break
+        await asyncio.sleep(2)
+        # Wait for Add button to reappear (list view ready)
+        add_btn = frame.locator("button[id$='_newButton']").first
+        for _ in range(10):
+            if await add_btn.count() > 0 and await add_btn.is_visible(timeout=500):
+                return
+            await asyncio.sleep(0.5)
 
     async def _click_by_id(self, frame: Frame, selector: str) -> bool:
         """Click an element by CSS selector (typically ID-based)."""
