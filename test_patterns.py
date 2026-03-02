@@ -21,9 +21,9 @@ class TestDayDatePattern:
     """Patterns.DAY_DATE must parse day labels from Zeitdetails / Time details."""
 
     @pytest.mark.parametrize(
-        "label, expected_day, expected_month, expected_date",
+        "label, expected_abbrev, expected_dd, expected_mm",
         [
-            # German labels
+            # German labels (format: DD/MM with locale=de)
             ("Mo 3/02", "Mo", "3", "02"),
             ("Di 4/02", "Di", "4", "02"),
             ("Mi 5/02", "Mi", "5", "02"),
@@ -31,7 +31,7 @@ class TestDayDatePattern:
             ("Fr 7/02", "Fr", "7", "02"),
             ("Sa 8/02", "Sa", "8", "02"),
             ("So 9/02", "So", "9", "02"),
-            # English labels
+            # English labels (still DD/MM because locale=de is hardcoded)
             ("Mon 3/02", "Mon", "3", "02"),
             ("Tue 4/02", "Tue", "4", "02"),
             ("Wed 5/02", "Wed", "5", "02"),
@@ -47,12 +47,12 @@ class TestDayDatePattern:
             ("Fri 14.11", "Fri", "14", "11"),
         ],
     )
-    def test_day_date_matches(self, label, expected_day, expected_month, expected_date):
+    def test_day_date_matches(self, label, expected_abbrev, expected_dd, expected_mm):
         m = Patterns.DAY_DATE.match(label)
         assert m is not None, f"DAY_DATE should match '{label}'"
-        assert m.group(1) == expected_day
-        assert m.group(2) == expected_month
-        assert m.group(3) == expected_date
+        assert m.group(1) == expected_abbrev
+        assert m.group(2) == expected_dd
+        assert m.group(3) == expected_mm
 
     @pytest.mark.parametrize(
         "label",

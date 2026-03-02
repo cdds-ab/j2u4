@@ -897,9 +897,9 @@ class Unit4Browser:
 
                     match = Patterns.DAY_DATE.match(label)
                     if match:
-                        day_name, month, day = match.groups()
-                        month = int(month)
+                        day_name, day, month = match.groups()
                         day = int(day)
+                        month = int(month)
 
                         current_year = datetime.now().year
                         current_month = datetime.now().month
