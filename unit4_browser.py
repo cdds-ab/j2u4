@@ -604,7 +604,7 @@ class Unit4Browser:
         except Exception as e:
             print(f"FAILED (zoom: {e})")
             return False
-        await asyncio.sleep(3)
+        await asyncio.sleep(1.5)
 
         # Fill form fields (ID-based with label fallback)
         print("filling ArbAuft...", end=" ", flush=True)
@@ -614,7 +614,6 @@ class Unit4Browser:
             if not arbauft_ok:
                 arbauft_ok = await self._fill_field(frame, "Work order", worklog.arbauft)
         print("OK" if arbauft_ok else "FAIL", end=" | ", flush=True)
-        await asyncio.sleep(1)
 
         print("Aktivität...", end=" ", flush=True)
         aktivitaet_ok = await self._fill_field_by_id(frame, "input[id*='1576_Editor']", "TEMPO")
@@ -664,7 +663,7 @@ class Unit4Browser:
             print("FAILED (OK) - dialog closed")
             return False
 
-        await asyncio.sleep(3)
+        await asyncio.sleep(1)
 
         # Verify dialog is closed (ID-based check for Add button)
         add_btn = frame.locator("button[id$='_newButton']").first
@@ -677,7 +676,6 @@ class Unit4Browser:
                 if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
                     break
 
-        await asyncio.sleep(1)
         print("OK")
         return True
 
@@ -696,7 +694,7 @@ class Unit4Browser:
             for strategy in strategies:
                 try:
                     elem = strategy()
-                    if await elem.count() > 0 and await elem.first.is_visible(timeout=1000):
+                    if await elem.count() > 0 and await elem.first.is_visible(timeout=300):
                         await elem.first.click(timeout=TIMEOUT)
                         await asyncio.sleep(0.2)
                         await elem.first.press("Control+a")
@@ -938,7 +936,7 @@ class Unit4Browser:
         """Click an element by CSS selector (typically ID-based)."""
         try:
             elem = frame.locator(selector).first
-            if await elem.count() > 0 and await elem.is_visible(timeout=1000):
+            if await elem.count() > 0 and await elem.is_visible(timeout=500):
                 await elem.click(timeout=TIMEOUT)
                 return True
         except Exception:
@@ -949,7 +947,7 @@ class Unit4Browser:
         """Fill a form field by CSS selector (typically ID-based)."""
         try:
             elem = frame.locator(selector).first
-            if await elem.count() > 0 and await elem.first.is_visible(timeout=1000):
+            if await elem.count() > 0 and await elem.first.is_visible(timeout=500):
                 await elem.click(timeout=TIMEOUT)
                 await asyncio.sleep(0.2)
                 await elem.press("Control+a")
@@ -974,7 +972,7 @@ class Unit4Browser:
         for strategy in strategies:
             try:
                 elem = strategy()
-                if await elem.count() > 0 and await elem.is_visible(timeout=1000):
+                if await elem.count() > 0 and await elem.is_visible(timeout=300):
                     await elem.click(timeout=TIMEOUT)
                     return True
             except Exception:
