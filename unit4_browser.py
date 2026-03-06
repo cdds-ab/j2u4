@@ -590,16 +590,16 @@ class Unit4Browser:
             return False
         await asyncio.sleep(1)
 
-        # Click first zoom icon (new row) — ID-based
+        # Click zoom icon on editable row (new row) — ID-based
         try:
-            zoom_btn = frame.locator("button[id$='_zoom']").first
+            zoom_btn = frame.locator("[class='EditRow'] button[id$='_zoom']")
             if await zoom_btn.count() > 0:
                 await zoom_btn.click(timeout=TIMEOUT)
             else:
                 # Fallback: title-based
-                zoom_icons = await frame.locator("[title*='Detail']").all()
-                if zoom_icons:
-                    await zoom_icons[0].click(timeout=TIMEOUT)
+                zoom_icons = await frame.locator("[class='EditRow'] [title*='etail']") # "Detail" vs. "details"
+                if zoom_icons.count() > 0:
+                    await zoom_icons.click(timeout=TIMEOUT)
                 else:
                     print("FAILED (no zoom)")
                     return False
