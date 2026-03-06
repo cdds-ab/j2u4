@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime
 
-from playwright.async_api import Frame, Page, async_playwright, BrowserContext, expect
+from playwright.async_api import Frame, Locator, Page, async_playwright, BrowserContext, expect
 
 from models import TempoWorklog, Unit4Entry
 from patterns import Patterns
@@ -455,14 +455,15 @@ class Unit4Browser:
         # Close any open detail view
         await self._close_detail_view()
 
-        marked_count = 0
+        marked = []
         for entry in entries:
-            if await self._mark_entry_for_deletion(frame, entry):
-                marked_count += 1
+            checkbox = await self._mark_entry_for_deletion(frame, entry)
+            if checkbox:
+                marked.append(checkbox)
 
-        if marked_count > 0:
+        if len(marked) > 0:
             print()
-            print(f"    Marked {marked_count} entries.")
+            print(f"    Marked {len(marked)} entries.")
             print("    >>> Check the browser - are all entries marked correctly?")
             print("    >>> Press ENTER to delete, or Ctrl+C to abort...")
             try:
@@ -477,12 +478,8 @@ class Unit4Browser:
                 if not deleted:
                     deleted = await self._click_button(frame, "Delete")
             if deleted:
-                await asyncio.sleep(3)
-                # Confirm dialog (Yes/Ja)
-                for locale in ("de", "en"):
-                    if await self._click_button(frame, LOCALE_STRINGS[locale]["confirm_yes"]):
-                        break
-                await self._click_button(frame, "OK")
+                for checkbox in marked:
+                    await expect(checkbox, "Should have deleted selected entries").not_to_be_attached()
                 await asyncio.sleep(2)
                 print("deleted...", end=" ", flush=True)
 
@@ -493,7 +490,7 @@ class Unit4Browser:
             else:
                 print("button not found")
 
-        return marked_count
+        return len(marked)
 
     async def _close_detail_view(self):
         """Close any open detail view."""
@@ -522,7 +519,7 @@ class Unit4Browser:
             print(f"error: {e}")
         await asyncio.sleep(0.5)
 
-    async def _mark_entry_for_deletion(self, frame: Frame, entry: Unit4Entry) -> bool:
+    async def _mark_entry_for_deletion(self, frame: Frame, entry: Unit4Entry) -> Locator | None:
         """Mark a single entry for deletion by clicking its checkbox."""
         print(f"    [WL:{entry.worklog_id}] {entry.ticketno}...", end=" ", flush=True)
 
@@ -556,7 +553,7 @@ class Unit4Browser:
                         }""")
                         await asyncio.sleep(0.3)
                     print("marked")
-                    return True
+                    return checkbox
                 else:
                     print("no checkbox")
             else:
@@ -564,7 +561,7 @@ class Unit4Browser:
         except Exception as e:
             print(f"error: {e}")
 
-        return False
+        return None
 
     async def create_entry(self, worklog: TempoWorklog, dry_run: bool = False) -> bool:
         """Add a single entry to Unit4."""
