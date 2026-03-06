@@ -651,32 +651,10 @@ class Unit4Browser:
             await self._cancel_and_recover(frame)
             return False
 
-        # Click OK to close dialog (ID-based, then text fallback)
-        ok_clicked = await self._click_by_id(frame, "button[id$='s108_apply']")
-        if not ok_clicked:
-            ok_clicked = await self._click_button(frame, "OK")
-        if not ok_clicked:
-            await self.page.keyboard.press("Enter")
-            await asyncio.sleep(1)
-            for locale in ("de", "en"):
-                if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
-                    break
-            await self._click_button(frame, "OK")
-            print("FAILED (OK) - dialog closed")
-            return False
-
-        await asyncio.sleep(1)
-
-        # Verify dialog is closed (ID-based check for Add button)
-        add_btn = frame.locator("button[id$='_newButton']").first
-        for _ in range(10):
-            if await add_btn.count() > 0 and await add_btn.is_visible(timeout=500):
-                break
-            await asyncio.sleep(0.5)
-            await self._click_button(frame, "OK")
-            for locale in ("de", "en"):
-                if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
-                    break
+        # Click OK to close dialog 
+        ok_btn = frame.locator("#b__dialog [onclick*='closeZoom']")
+        await ok_btn.click()
+        await expect(frame.locator("#b__dialog")).to_be_hidden()
 
         print("OK")
         return True
@@ -796,6 +774,9 @@ class Unit4Browser:
                         )
                     await self.page.keyboard.press("Tab")
                     await asyncio.sleep(0.5)
+                    apply_btn = frame.locator("#b__dialog button[tg_id='apply']")
+                    await apply_btn.click()
+                    await expect(apply_btn).to_be_hidden()
                     print("OK")
                     return True
                 else:
