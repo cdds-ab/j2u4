@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime
 
-from playwright.async_api import Frame, Page, async_playwright, BrowserContext
+from playwright.async_api import Frame, Locator, Page, async_playwright, BrowserContext, expect
 
 from models import TempoWorklog, Unit4Entry
 from patterns import Patterns
@@ -455,14 +455,15 @@ class Unit4Browser:
         # Close any open detail view
         await self._close_detail_view()
 
-        marked_count = 0
+        marked = []
         for entry in entries:
-            if await self._mark_entry_for_deletion(frame, entry):
-                marked_count += 1
+            checkbox = await self._mark_entry_for_deletion(frame, entry)
+            if checkbox:
+                marked.append(checkbox)
 
-        if marked_count > 0:
+        if len(marked) > 0:
             print()
-            print(f"    Marked {marked_count} entries.")
+            print(f"    Marked {len(marked)} entries.")
             print("    >>> Check the browser - are all entries marked correctly?")
             print("    >>> Press ENTER to delete, or Ctrl+C to abort...")
             try:
@@ -477,12 +478,8 @@ class Unit4Browser:
                 if not deleted:
                     deleted = await self._click_button(frame, "Delete")
             if deleted:
-                await asyncio.sleep(3)
-                # Confirm dialog (Yes/Ja)
-                for locale in ("de", "en"):
-                    if await self._click_button(frame, LOCALE_STRINGS[locale]["confirm_yes"]):
-                        break
-                await self._click_button(frame, "OK")
+                for checkbox in marked:
+                    await expect(checkbox, "Should have deleted selected entries").not_to_be_attached()
                 await asyncio.sleep(2)
                 print("deleted...", end=" ", flush=True)
 
@@ -493,7 +490,7 @@ class Unit4Browser:
             else:
                 print("button not found")
 
-        return marked_count
+        return len(marked)
 
     async def _close_detail_view(self):
         """Close any open detail view."""
@@ -522,7 +519,7 @@ class Unit4Browser:
             print(f"error: {e}")
         await asyncio.sleep(0.5)
 
-    async def _mark_entry_for_deletion(self, frame: Frame, entry: Unit4Entry) -> bool:
+    async def _mark_entry_for_deletion(self, frame: Frame, entry: Unit4Entry) -> Locator | None:
         """Mark a single entry for deletion by clicking its checkbox."""
         print(f"    [WL:{entry.worklog_id}] {entry.ticketno}...", end=" ", flush=True)
 
@@ -556,7 +553,7 @@ class Unit4Browser:
                         }""")
                         await asyncio.sleep(0.3)
                     print("marked")
-                    return True
+                    return checkbox
                 else:
                     print("no checkbox")
             else:
@@ -564,7 +561,7 @@ class Unit4Browser:
         except Exception as e:
             print(f"error: {e}")
 
-        return False
+        return None
 
     async def create_entry(self, worklog: TempoWorklog, dry_run: bool = False) -> bool:
         """Add a single entry to Unit4."""
@@ -590,16 +587,16 @@ class Unit4Browser:
             return False
         await asyncio.sleep(1)
 
-        # Click first zoom icon (new row) — ID-based
+        # Click zoom icon on editable row (new row) — ID-based
         try:
-            zoom_btn = frame.locator("button[id$='_zoom']").first
+            zoom_btn = frame.locator("[class='EditRow'] button[id$='_zoom']")
             if await zoom_btn.count() > 0:
                 await zoom_btn.click(timeout=TIMEOUT)
             else:
                 # Fallback: title-based
-                zoom_icons = await frame.locator("[title*='Detail']").all()
-                if zoom_icons:
-                    await zoom_icons[0].click(timeout=TIMEOUT)
+                zoom_icons = await frame.locator("[class='EditRow'] [title*='etail']") # "Detail" vs. "details"
+                if zoom_icons.count() > 0:
+                    await zoom_icons.click(timeout=TIMEOUT)
                 else:
                     print("FAILED (no zoom)")
                     return False
@@ -610,7 +607,7 @@ class Unit4Browser:
 
         # Fill form fields (ID-based with label fallback)
         print("filling ArbAuft...", end=" ", flush=True)
-        arbauft_ok = await self._fill_field_by_id(frame, "input[id*='1574_Editor']", worklog.arbauft)
+        arbauft_ok = await self._fill_field_by_id(frame, "#b__dialog input[id*='1678_Editor']", worklog.arbauft)
         if not arbauft_ok:
             arbauft_ok = await self._fill_field(frame, "ArbAuft", worklog.arbauft)
             if not arbauft_ok:
@@ -618,7 +615,7 @@ class Unit4Browser:
         print("OK" if arbauft_ok else "FAIL", end=" | ", flush=True)
 
         print("Aktivität...", end=" ", flush=True)
-        aktivitaet_ok = await self._fill_field_by_id(frame, "input[id*='1576_Editor']", "TEMPO")
+        aktivitaet_ok = await self._fill_field_by_id(frame, "#b__dialog input[id*='1680_Editor']", "TEMPO")
         if not aktivitaet_ok:
             aktivitaet_ok = await self._fill_field(frame, "Aktivität", "TEMPO")
             if not aktivitaet_ok:
@@ -626,7 +623,7 @@ class Unit4Browser:
         print("OK" if aktivitaet_ok else "FAIL", end=" | ", flush=True)
 
         print("Text...", end=" ", flush=True)
-        text_ok = await self._fill_field_by_id(frame, "input[id*='description_i']", text)
+        text_ok = await self._fill_field_by_id(frame, "#b__dialog input[id*='description_i']", text)
         if not text_ok:
             text_ok = await self._fill_field(frame, "Text", text)
             if not text_ok:
@@ -651,32 +648,10 @@ class Unit4Browser:
             await self._cancel_and_recover(frame)
             return False
 
-        # Click OK to close dialog (ID-based, then text fallback)
-        ok_clicked = await self._click_by_id(frame, "button[id$='s108_apply']")
-        if not ok_clicked:
-            ok_clicked = await self._click_button(frame, "OK")
-        if not ok_clicked:
-            await self.page.keyboard.press("Enter")
-            await asyncio.sleep(1)
-            for locale in ("de", "en"):
-                if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
-                    break
-            await self._click_button(frame, "OK")
-            print("FAILED (OK) - dialog closed")
-            return False
-
-        await asyncio.sleep(1)
-
-        # Verify dialog is closed (ID-based check for Add button)
-        add_btn = frame.locator("button[id$='_newButton']").first
-        for _ in range(10):
-            if await add_btn.count() > 0 and await add_btn.is_visible(timeout=500):
-                break
-            await asyncio.sleep(0.5)
-            await self._click_button(frame, "OK")
-            for locale in ("de", "en"):
-                if await self._click_button(frame, LOCALE_STRINGS[locale]["cancel"]):
-                    break
+        # Click OK to close dialog 
+        ok_btn = frame.locator("#b__dialog [onclick*='closeZoom']")
+        await ok_btn.click()
+        await expect(frame.locator("#b__dialog")).to_be_hidden()
 
         print("OK")
         return True
@@ -701,7 +676,11 @@ class Unit4Browser:
                         await asyncio.sleep(0.2)
                         await elem.first.press("Control+a")
                         await elem.first.fill(value, timeout=TIMEOUT)
+                        # trying to  escape from the suggestion popup without harm:
+                        await asyncio.sleep(0.3)
                         await self.page.keyboard.press("Tab")
+                        await asyncio.sleep(0.3)
+                        await self.page.keyboard.press("Tab") # press twice so we really escaped the field and make the data stick. Otherwise, selecting the next input will reset the input value to the first autosuggestion.
                         await asyncio.sleep(0.3)
                         return True
                 except Exception:
@@ -719,7 +698,6 @@ class Unit4Browser:
                 await asyncio.sleep(1)
 
             await self._expand_zeitdetails(frame)
-            await asyncio.sleep(1.0)
 
             date_to_label = await self._read_zeitdetails_structure(frame)
 
@@ -797,6 +775,9 @@ class Unit4Browser:
                         )
                     await self.page.keyboard.press("Tab")
                     await asyncio.sleep(0.5)
+                    apply_btn = frame.locator("#b__dialog button[tg_id='apply']")
+                    await apply_btn.click()
+                    await expect(apply_btn).to_be_hidden()
                     print("OK")
                     return True
                 else:
@@ -822,62 +803,21 @@ class Unit4Browser:
         """Expand the Zeitdetails section if collapsed."""
         print("    Expanding Zeitdetails...", end=" ", flush=True)
 
-        day_pat = DAY_ABBREV_PATTERN
-        day_patterns = [
-            f"text=/^{day_pat} \\d+\\/\\d+/",
-            f"text=/^{day_pat} \\d+\\.\\d+/",
-            f"text=/^{day_pat}\\s+\\d/",
-        ]
+        expansion = frame.locator("#b__dialog [class='MinimiseSection'] [aria-expanded]")
+        await expect(expansion).to_be_visible()
 
         async def check_expanded():
-            for pattern in day_patterns:
-                try:
-                    elem = frame.locator(pattern).first
-                    if await elem.count() > 0 and await elem.is_visible(timeout=500):
-                        return True
-                except Exception:
-                    continue
-            return False
+            return await expansion.get_attribute("aria-expanded") == "true"
 
         if await check_expanded():
             print("already open")
             return True
 
-        # Click the Zeitdetails / Time details header (try both locales)
-        zeit_locators = []
-        for locale in ("de", "en"):
-            td_text = LOCALE_STRINGS[locale]["time_details"]
-            zeit_locators.extend([
-                frame.locator(f"legend:has-text('{td_text}')").first,
-                frame.locator(f"text=/[≫»▸▾].*{td_text}/").first,
-                frame.locator(f"text='{td_text}'").first,
-            ])
-        zeit_locators.append(frame.locator("div:has-text('Zeitdetails')").first)
-        zeit_locators.append(frame.locator("div:has-text('Time details')").first)
+        # Click the Zeitdetails / Time details header
+        await expansion.click()
+        await expect(expansion).to_have_attribute("aria-expanded", "true")
 
-        for locator in zeit_locators:
-            try:
-                if await locator.count() > 0 and await locator.is_visible(timeout=500):
-                    text = await locator.inner_text(timeout=300)
-                    print(f"clicking '{text[:20]}'...", end=" ", flush=True)
-                    await locator.click(timeout=TIMEOUT)
-                    await asyncio.sleep(2)
-
-                    if await check_expanded():
-                        print("OK")
-                        return True
-                    else:
-                        print("waiting...", end=" ", flush=True)
-                        await asyncio.sleep(1)
-                        if await check_expanded():
-                            print("OK")
-                            return True
-                    break
-            except Exception:
-                continue
-
-        print("not expanded yet")
-        return False
+        return True
 
     async def _read_zeitdetails_structure(self, frame: Frame) -> dict[str, str]:
         """Read the Zeitdetails table structure."""
@@ -954,7 +894,11 @@ class Unit4Browser:
                 await asyncio.sleep(0.2)
                 await elem.press("Control+a")
                 await elem.fill(value, timeout=TIMEOUT)
+                # trying to escape from the suggestion popup without harm:
+                await asyncio.sleep(0.3)
                 await self.page.keyboard.press("Tab")
+                await asyncio.sleep(0.3)
+                await self.page.keyboard.press("Tab") # press twice so we really escaped the field and make the data stick. Otherwise, selecting the next input will reset the input value to the first autosuggestion.
                 await asyncio.sleep(0.3)
                 return True
         except Exception:

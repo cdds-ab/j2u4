@@ -327,7 +327,7 @@ async def sync(week: str, cutover: str | None, execute: bool):
     total_hours = 0
     for wl in sorted(valid_worklogs, key=lambda x: (x.date, x.issue_key)):
         print(
-            f"    {wl.date} | {wl.hours:5.2f}h | {wl.issue_key:<15} | {wl.arbauft} [WL:{wl.worklog_id}]"
+            f"    {wl.date} | {wl.hours:5.2f}h | {wl.issue_key:<15} | {wl.arbauft} [WL:{wl.worklog_id}] {wl.description[:30]}"
         )
         total_hours += wl.hours
     print(f"    {'─' * 60}")
