@@ -610,7 +610,7 @@ class Unit4Browser:
 
         # Fill form fields (ID-based with label fallback)
         print("filling ArbAuft...", end=" ", flush=True)
-        arbauft_ok = await self._fill_field_by_id(frame, "input[id*='1678_Editor']", worklog.arbauft)
+        arbauft_ok = await self._fill_field_by_id(frame, "#b__dialog input[id*='1678_Editor']", worklog.arbauft)
         if not arbauft_ok:
             arbauft_ok = await self._fill_field(frame, "ArbAuft", worklog.arbauft)
             if not arbauft_ok:
@@ -618,7 +618,7 @@ class Unit4Browser:
         print("OK" if arbauft_ok else "FAIL", end=" | ", flush=True)
 
         print("Aktivität...", end=" ", flush=True)
-        aktivitaet_ok = await self._fill_field_by_id(frame, "input[id*='1680_Editor']", "TEMPO")
+        aktivitaet_ok = await self._fill_field_by_id(frame, "#b__dialog input[id*='1680_Editor']", "TEMPO")
         if not aktivitaet_ok:
             aktivitaet_ok = await self._fill_field(frame, "Aktivität", "TEMPO")
             if not aktivitaet_ok:
@@ -626,7 +626,7 @@ class Unit4Browser:
         print("OK" if aktivitaet_ok else "FAIL", end=" | ", flush=True)
 
         print("Text...", end=" ", flush=True)
-        text_ok = await self._fill_field_by_id(frame, "input[id*='description_i']", text)
+        text_ok = await self._fill_field_by_id(frame, "#b__dialog input[id*='description_i']", text)
         if not text_ok:
             text_ok = await self._fill_field(frame, "Text", text)
             if not text_ok:
