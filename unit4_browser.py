@@ -679,7 +679,11 @@ class Unit4Browser:
                         await asyncio.sleep(0.2)
                         await elem.first.press("Control+a")
                         await elem.first.fill(value, timeout=TIMEOUT)
+                        # trying to  escape from the suggestion popup without harm:
+                        await asyncio.sleep(0.3)
                         await self.page.keyboard.press("Tab")
+                        await asyncio.sleep(0.3)
+                        await self.page.keyboard.press("Tab") # press twice so we really escaped the field and make the data stick. Otherwise, selecting the next input will reset the input value to the first autosuggestion.
                         await asyncio.sleep(0.3)
                         return True
                 except Exception:
@@ -893,7 +897,11 @@ class Unit4Browser:
                 await asyncio.sleep(0.2)
                 await elem.press("Control+a")
                 await elem.fill(value, timeout=TIMEOUT)
+                # trying to escape from the suggestion popup without harm:
+                await asyncio.sleep(0.3)
                 await self.page.keyboard.press("Tab")
+                await asyncio.sleep(0.3)
+                await self.page.keyboard.press("Tab") # press twice so we really escaped the field and make the data stick. Otherwise, selecting the next input will reset the input value to the first autosuggestion.
                 await asyncio.sleep(0.3)
                 return True
         except Exception:
