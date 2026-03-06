@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime
 
-from playwright.async_api import Frame, Page, async_playwright, BrowserContext
+from playwright.async_api import Frame, Page, async_playwright, BrowserContext, expect
 
 from models import TempoWorklog, Unit4Entry
 from patterns import Patterns
@@ -719,7 +719,6 @@ class Unit4Browser:
                 await asyncio.sleep(1)
 
             await self._expand_zeitdetails(frame)
-            await asyncio.sleep(1.0)
 
             date_to_label = await self._read_zeitdetails_structure(frame)
 
@@ -822,62 +821,21 @@ class Unit4Browser:
         """Expand the Zeitdetails section if collapsed."""
         print("    Expanding Zeitdetails...", end=" ", flush=True)
 
-        day_pat = DAY_ABBREV_PATTERN
-        day_patterns = [
-            f"text=/^{day_pat} \\d+\\/\\d+/",
-            f"text=/^{day_pat} \\d+\\.\\d+/",
-            f"text=/^{day_pat}\\s+\\d/",
-        ]
+        expansion = frame.locator("#b__dialog [class='MinimiseSection'] [aria-expanded]")
+        await expect(expansion).to_be_visible()
 
         async def check_expanded():
-            for pattern in day_patterns:
-                try:
-                    elem = frame.locator(pattern).first
-                    if await elem.count() > 0 and await elem.is_visible(timeout=500):
-                        return True
-                except Exception:
-                    continue
-            return False
+            return await expansion.get_attribute("aria-expanded") == "true"
 
         if await check_expanded():
             print("already open")
             return True
 
-        # Click the Zeitdetails / Time details header (try both locales)
-        zeit_locators = []
-        for locale in ("de", "en"):
-            td_text = LOCALE_STRINGS[locale]["time_details"]
-            zeit_locators.extend([
-                frame.locator(f"legend:has-text('{td_text}')").first,
-                frame.locator(f"text=/[≫»▸▾].*{td_text}/").first,
-                frame.locator(f"text='{td_text}'").first,
-            ])
-        zeit_locators.append(frame.locator("div:has-text('Zeitdetails')").first)
-        zeit_locators.append(frame.locator("div:has-text('Time details')").first)
+        # Click the Zeitdetails / Time details header
+        await expansion.click()
+        await expect(expansion).to_have_attribute("aria-expanded", "true")
 
-        for locator in zeit_locators:
-            try:
-                if await locator.count() > 0 and await locator.is_visible(timeout=500):
-                    text = await locator.inner_text(timeout=300)
-                    print(f"clicking '{text[:20]}'...", end=" ", flush=True)
-                    await locator.click(timeout=TIMEOUT)
-                    await asyncio.sleep(2)
-
-                    if await check_expanded():
-                        print("OK")
-                        return True
-                    else:
-                        print("waiting...", end=" ", flush=True)
-                        await asyncio.sleep(1)
-                        if await check_expanded():
-                            print("OK")
-                            return True
-                    break
-            except Exception:
-                continue
-
-        print("not expanded yet")
-        return False
+        return True
 
     async def _read_zeitdetails_structure(self, frame: Frame) -> dict[str, str]:
         """Read the Zeitdetails table structure."""
