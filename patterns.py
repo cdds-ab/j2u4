@@ -24,5 +24,8 @@ class Patterns:
     # Date format: YYYY-MM-DD
     DATE_FORMAT = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-    # Numeric cell value (hours): 0.00, 8:00, 7,5
-    NUMERIC_CELL = re.compile(r"^[\d:,.]+$")
+    # Numeric cell value (hours): 0,00  7,5  4.00 — but NOT time like 08:00
+    NUMERIC_CELL = re.compile(r"^[\d,.]+$")
+
+    # Time-of-day value: 08:00, 09:30 — skip these in Zeitdetails
+    TIME_VALUE = re.compile(r"^\d{1,2}:\d{2}$")

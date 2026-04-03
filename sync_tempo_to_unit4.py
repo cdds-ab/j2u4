@@ -251,7 +251,7 @@ def ask_for_arbauft(worklog: TempoWorklog, mapping: dict) -> str | None:
     return arbauft
 
 
-async def sync(week: str, cutover: str | None, execute: bool):
+async def sync(week: str, cutover: str | None, execute: bool, end: str | None = None):
     """Main sync function."""
     dry_run = not execute
     mode = "EXECUTE" if execute else "DRY-RUN"
@@ -278,10 +278,12 @@ async def sync(week: str, cutover: str | None, execute: bool):
     date_from, date_to = get_week_dates(week)
     print(f"[*] Week {week}: {date_from} to {date_to}")
 
-    # Apply cutover if specified
     if cutover:
         date_from = cutover
-        print(f"[*] Cutover: starting from {cutover}")
+        print(f"[*] Cutover start: {date_from}")
+    if end:
+        date_to = end
+        print(f"[*] Extended end: {date_to}")
 
     # Fetch Tempo worklogs
     print()
@@ -521,6 +523,7 @@ Examples:
         "--execute", action="store_true", help="Actually execute changes (default: dry-run)"
     )
     parser.add_argument("--cutover", help="Only sync from this date onwards (YYYY-MM-DD)")
+    parser.add_argument("--end", help="Extend week end date to this date (YYYY-MM-DD)")
     parser.add_argument(
         "--check", action="store_true", help="Check connectivity to all services and exit"
     )
@@ -549,7 +552,7 @@ Examples:
         print(f"Error: Invalid cutover format '{args.cutover}'. Expected YYYY-MM-DD")
         return 1
 
-    asyncio.run(sync(week, args.cutover, args.execute))
+    asyncio.run(sync(week, args.cutover, args.execute, args.end))
     return 0
 
 

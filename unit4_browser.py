@@ -548,13 +548,11 @@ class Unit4Browser:
             if row and await row.count() > 0:
                 checkbox = row.locator("input[type='checkbox']").first
                 if await checkbox.count() > 0:
-                    already_checked = await checkbox.is_checked()
-                    if not already_checked:
-                        await checkbox.evaluate("""el => {
-                            el.scrollIntoView({block: 'center', behavior: 'instant'});
-                            el.click();
-                        }""")
-                        await asyncio.sleep(0.3)
+                    await checkbox.evaluate("""el => {
+                        el.scrollIntoView({block: 'center', behavior: 'instant'});
+                        el.click();
+                    }""")
+                    await asyncio.sleep(0.3)
                     print("marked")
                     return True
                 else:
@@ -608,48 +606,53 @@ class Unit4Browser:
             return False
         await asyncio.sleep(1.5)
 
-        # Fill form fields (ID-based with label fallback)
+        # Fill form fields (ID-based with label fallback + retry)
         print("filling ArbAuft...", end=" ", flush=True)
         arbauft_ok = await self._fill_field_by_id(frame, "input[id*='1574_Editor']", worklog.arbauft)
         if not arbauft_ok:
             arbauft_ok = await self._fill_field(frame, "ArbAuft", worklog.arbauft)
-            if not arbauft_ok:
-                arbauft_ok = await self._fill_field(frame, "Work order", worklog.arbauft)
         print("OK" if arbauft_ok else "FAIL", end=" | ", flush=True)
+        await asyncio.sleep(2)
 
         print("Aktivität...", end=" ", flush=True)
         aktivitaet_ok = await self._fill_field_by_id(frame, "input[id*='1576_Editor']", "TEMPO")
         if not aktivitaet_ok:
             aktivitaet_ok = await self._fill_field(frame, "Aktivität", "TEMPO")
-            if not aktivitaet_ok:
-                aktivitaet_ok = await self._fill_field(frame, "Activity", "TEMPO")
         print("OK" if aktivitaet_ok else "FAIL", end=" | ", flush=True)
 
         print("Text...", end=" ", flush=True)
         text_ok = await self._fill_field_by_id(frame, "input[id*='description_i']", text)
         if not text_ok:
             text_ok = await self._fill_field(frame, "Text", text)
-            if not text_ok:
-                text_ok = await self._fill_field(frame, "Description", text)
         print("OK" if text_ok else "FAIL", end=" | ", flush=True)
 
         print("Ticketno...", end=" ", flush=True)
-        ticketno_ok = await self._fill_field(frame, "Ticketno", worklog.issue_key)
+        ticketno_ok = await self._fill_field_by_id(frame, "input[id*='dim3_i']", worklog.issue_key)
         if not ticketno_ok:
-            ticketno_ok = await self._fill_field(frame, "Ticket", worklog.issue_key)
+            ticketno_ok = await self._fill_field(frame, "Ticketno", worklog.issue_key)
         print("OK" if ticketno_ok else "FAIL")
 
-        if not (arbauft_ok and text_ok):
-            print(f"FAILED (ArbAuft={arbauft_ok}, Text={text_ok})")
-            await self._cancel_and_recover(frame)
-            return False
+        # Retry failed fields once
+        if not (text_ok and ticketno_ok):
+            await asyncio.sleep(1)
+            if not text_ok:
+                print("    retry Text...", end=" ", flush=True)
+                text_ok = await self._fill_field_by_id(frame, "input[id*='description_i']", text)
+                print("OK" if text_ok else "FAIL")
+            if not ticketno_ok:
+                print("    retry Ticketno...", end=" ", flush=True)
+                ticketno_ok = await self._fill_field_by_id(frame, "input[id*='dim3_i']", worklog.issue_key)
+                print("OK" if ticketno_ok else "FAIL")
 
         # Fill hours in Zeitdetails
+        hours_str = str(worklog.hours).replace('.', ',')
+        d = datetime.strptime(worklog.date, "%Y-%m-%d")
+        day_name = DAY_NAMES[d.weekday()]
         zeit_ok = await self._fill_hours_by_date(frame, worklog.hours, worklog.date)
-        if not zeit_ok:
-            print("    [!] Could not fill hours - aborting entry")
-            await self._cancel_and_recover(frame)
-            return False
+
+        any_fail = not (arbauft_ok and aktivitaet_ok and text_ok and ticketno_ok and zeit_ok)
+        if any_fail:
+            print(f"    [!] UNVOLLSTÄNDIG: {worklog.arbauft} | {text} | {worklog.issue_key} | {day_name}: {hours_str}h")
 
         # Click OK to close dialog (ID-based, then text fallback)
         ok_clicked = await self._click_by_id(frame, "button[id$='s108_apply']")
@@ -667,7 +670,7 @@ class Unit4Browser:
 
         await asyncio.sleep(1)
 
-        # Verify dialog is closed (ID-based check for Add button)
+        # Wait for dialog to close
         add_btn = frame.locator("button[id$='_newButton']").first
         for _ in range(10):
             if await add_btn.count() > 0 and await add_btn.is_visible(timeout=500):
@@ -719,7 +722,7 @@ class Unit4Browser:
                 await asyncio.sleep(1)
 
             await self._expand_zeitdetails(frame)
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(1.5)
 
             date_to_label = await self._read_zeitdetails_structure(frame)
 
@@ -740,7 +743,7 @@ class Unit4Browser:
             print(f"    Zeitdetails ({day_name}): {hours_str}h ... ", end="", flush=True)
 
             try:
-                day_cell = frame.locator(f"text=/^{re.escape(day_name)} \\d/").first
+                day_cell = frame.locator(f"text=/^{re.escape(day_label)}/").first
                 if await day_cell.count() == 0:
                     print(f"{day_name} not visible, retry...", flush=True)
                     continue
@@ -757,7 +760,12 @@ class Unit4Browser:
                         if not await cell.is_visible(timeout=200):
                             continue
                         text = (await cell.inner_text(timeout=300)).strip()
-                        if text and Patterns.NUMERIC_CELL.match(text):
+                        if not text:
+                            continue
+                        # Skip time-of-day values like 08:00
+                        if Patterns.TIME_VALUE.match(text):
+                            continue
+                        if Patterns.NUMERIC_CELL.match(text):
                             erfasst_cell = cell
                             print(f"cell '{text}' ... ", end="", flush=True)
                             break
@@ -820,63 +828,25 @@ class Unit4Browser:
 
     async def _expand_zeitdetails(self, frame: Frame) -> bool:
         """Expand the Zeitdetails section if collapsed."""
-        print("    Expanding Zeitdetails...", end=" ", flush=True)
+        # Quick check: is any day row already visible?
+        day_row = frame.locator(f"text=/^{DAY_ABBREV_PATTERN} \\d+[\\/.]\\d+/").first
+        try:
+            if await day_row.count() > 0 and await day_row.is_visible(timeout=300):
+                return True
+        except Exception:
+            pass
 
-        day_pat = DAY_ABBREV_PATTERN
-        day_patterns = [
-            f"text=/^{day_pat} \\d+\\/\\d+/",
-            f"text=/^{day_pat} \\d+\\.\\d+/",
-            f"text=/^{day_pat}\\s+\\d/",
-        ]
-
-        async def check_expanded():
-            for pattern in day_patterns:
-                try:
-                    elem = frame.locator(pattern).first
-                    if await elem.count() > 0 and await elem.is_visible(timeout=500):
-                        return True
-                except Exception:
-                    continue
-            return False
-
-        if await check_expanded():
-            print("already open")
-            return True
-
-        # Click the Zeitdetails / Time details header (try both locales)
-        zeit_locators = []
-        for locale in ("de", "en"):
-            td_text = LOCALE_STRINGS[locale]["time_details"]
-            zeit_locators.extend([
-                frame.locator(f"legend:has-text('{td_text}')").first,
-                frame.locator(f"text=/[≫»▸▾].*{td_text}/").first,
-                frame.locator(f"text='{td_text}'").first,
-            ])
-        zeit_locators.append(frame.locator("div:has-text('Zeitdetails')").first)
-        zeit_locators.append(frame.locator("div:has-text('Time details')").first)
-
-        for locator in zeit_locators:
+        # Not expanded — click the legend
+        for td_text in ("Zeitdetails", "Time details"):
             try:
-                if await locator.count() > 0 and await locator.is_visible(timeout=500):
-                    text = await locator.inner_text(timeout=300)
-                    print(f"clicking '{text[:20]}'...", end=" ", flush=True)
-                    await locator.click(timeout=TIMEOUT)
-                    await asyncio.sleep(2)
-
-                    if await check_expanded():
-                        print("OK")
-                        return True
-                    else:
-                        print("waiting...", end=" ", flush=True)
-                        await asyncio.sleep(1)
-                        if await check_expanded():
-                            print("OK")
-                            return True
-                    break
+                legend = frame.locator(f"legend:has-text('{td_text}')").first
+                if await legend.count() > 0 and await legend.is_visible(timeout=300):
+                    await legend.click(timeout=TIMEOUT)
+                    await asyncio.sleep(1)
+                    return True
             except Exception:
                 continue
 
-        print("not expanded yet")
         return False
 
     async def _read_zeitdetails_structure(self, frame: Frame) -> dict[str, str]:
