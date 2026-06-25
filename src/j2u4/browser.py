@@ -470,7 +470,7 @@ class Unit4Browser:
             # and no amount of extra waiting will help.
             loc = self.page.get_by_text(text, exact=True).first
             try:
-                await loc.wait_for(state="visible", timeout=5000)
+                await loc.wait_for(state="visible", timeout=10000)
                 return locale_name, loc
             except Exception:
                 return None
@@ -1003,9 +1003,8 @@ class Unit4Browser:
         )
         print("OK" if arbauft_ok else "FAIL", end=" | ", flush=True)
 
-        # Wait for Aktivität to be enabled (ArbAuft postback). 8s leaves
-        # headroom for slower sessions — observed UNVOLLSTÄNDIG with 4s.
-        await self._wait_for_enabled(frame, "input[id*='1680_Editor']", timeout_s=8.0)
+        # Wait for project to be auto-filled by ArbAuft selection.
+        await frame.locator("#b__dialog input[id*='1679_Editor'][readonly]").wait_for(state="visible", timeout=8000)
 
         # Aktivität is an ARIA combobox. fill("TEMPO") snaps to NOTEMPO
         # because Unit4 selects the first alphabetical match. Workaround:
@@ -1196,19 +1195,9 @@ class Unit4Browser:
                 # Find active input
                 active_input = None
 
-                candidate = frame.locator("input:focus").first
+                candidate = erfasst_cell.locator("input[data-type='Double']")
                 if await candidate.count() > 0:
                     active_input = candidate
-
-                if not active_input:
-                    candidate = erfasst_cell.locator("input:not([readonly])").first
-                    if await candidate.count() > 0:
-                        active_input = candidate
-
-                if not active_input:
-                    candidate = frame.locator("input[data-type='Double']:not([readonly]):not([disabled])").first
-                    if await candidate.count() > 0:
-                        active_input = candidate
 
                 if active_input and await active_input.count() > 0:
                     try:
@@ -1387,7 +1376,7 @@ class Unit4Browser:
 
         if saved:
             ok_btn = self.page.locator("[data-u4id*='success_OK']").describe("Save success OK button")
-            await expect(ok_btn).to_be_visible()
+            await expect(ok_btn).to_be_visible(timeout=10000)
             await ok_btn.click()
             await expect(ok_btn).to_be_hidden()
 
